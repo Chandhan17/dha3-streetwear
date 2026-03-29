@@ -3,7 +3,7 @@ import clientConfig from '../config'
 
 function Navbar({ adminMode = false, onLogout, isLoggingOut = false }) {
   const navLinkClass = ({ isActive }) =>
-    `rounded-full px-4 py-2 text-sm font-semibold transition ${
+    `rounded-full px-2 py-1 text-xs font-semibold transition sm:px-4 sm:py-2 sm:text-sm ${
       isActive
         ? 'bg-white text-black shadow-soft'
         : 'text-white/85 hover:bg-white/10 hover:text-white'
@@ -11,7 +11,7 @@ function Navbar({ adminMode = false, onLogout, isLoggingOut = false }) {
 
   return (
     <header className="sticky top-0 z-50 border-b border-white/15 bg-black/95 text-white backdrop-blur-md">
-      <div className="mx-auto flex w-full max-w-[1200px] items-center justify-between gap-3 px-4 py-3 md:px-6 md:py-4">
+      <div className="mx-auto flex w-full max-w-[1200px] flex-wrap items-center justify-between gap-3 px-4 py-3 sm:flex-nowrap md:px-6 md:py-4">
         <Link to="/" className="inline-flex items-center gap-3">
           <img
             src={clientConfig.logoPath}
@@ -23,7 +23,7 @@ function Navbar({ adminMode = false, onLogout, isLoggingOut = false }) {
             }}
           />
           <div className="leading-tight">
-            <p className="font-display text-lg tracking-wide text-white md:text-xl">
+            <p className="font-display text-sm tracking-wide text-white sm:text-lg md:text-xl">
               {clientConfig.shopName}
             </p>
             <p className="hidden text-[0.62rem] uppercase tracking-[0.18em] text-white/60 md:block">
@@ -32,12 +32,12 @@ function Navbar({ adminMode = false, onLogout, isLoggingOut = false }) {
           </div>
         </Link>
 
-        <nav className="flex items-center gap-2 md:gap-3">
+        <nav className="flex w-full flex-wrap items-center justify-between gap-2 overflow-x-auto sm:w-auto sm:flex-nowrap sm:justify-end sm:gap-2 md:gap-3">
           <a
             href={clientConfig.instagramLink}
             target="_blank"
             rel="noreferrer"
-            className="rounded-full border border-white/30 px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-white transition hover:bg-white/10 md:px-4"
+            className="w-full rounded-full border border-white/30 px-2 py-1 text-center text-xs font-semibold uppercase tracking-[0.14em] text-white transition hover:bg-white/10 sm:w-auto sm:px-4 sm:py-2"
           >
             Instagram
           </a>
@@ -61,7 +61,7 @@ function Navbar({ adminMode = false, onLogout, isLoggingOut = false }) {
                 type="button"
                 onClick={onLogout}
                 disabled={isLoggingOut}
-                className="rounded-full border border-white/30 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-70"
+                className="rounded-full border border-white/30 px-2 py-1 text-xs font-semibold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-70 sm:px-4 sm:py-2 sm:text-sm"
               >
                 {isLoggingOut ? 'Signing Out...' : 'Logout'}
               </button>
