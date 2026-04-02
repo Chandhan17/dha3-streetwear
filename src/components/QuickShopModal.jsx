@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import clientConfig from '../config'
+import { initiatePayment } from '../services/paymentService'
+import { createOrder } from '../services/orderService'
 
 const CUSTOMER_DETAILS_STORAGE_KEY = 'quickShopCustomerDetails'
 
@@ -49,6 +51,28 @@ function persistCustomerDetails({ name, phone, address }) {
   }
 }
 
+function openWhatsAppWithFallback(whatsappLink) {
+  try {
+    // Avoid false-negative popup detection in some browsers.
+    const popup = window.open(whatsappLink, '_blank')
+    if (!popup) {
+      return false
+    }
+
+    try {
+      if (typeof popup.focus === 'function') {
+        popup.focus()
+      }
+    } catch {
+      // Focus can fail on some browsers/extensions even when tab opened successfully.
+    }
+
+    return true
+  } catch {
+    return false
+  }
+}
+
 function QuickShopModal({
   isOpen,
   open,
@@ -70,6 +94,9 @@ function QuickShopModal({
     }
   })
   const [errors, setErrors] = useState(initialErrorState)
+  const [isProcessing, setIsProcessing] = useState(false)
+  const [paymentError, setPaymentError] = useState('')
+  const [manualWhatsAppLink, setManualWhatsAppLink] = useState('')
   const modalOpen = typeof isOpen === 'boolean' ? isOpen : Boolean(open)
 
   const resolvedProductName = String(product?.name || productName || '').trim()
@@ -129,9 +156,18 @@ function QuickShopModal({
         [name]: '',
       }))
     }
+
+    // Clear payment error when user changes form
+    if (paymentError) {
+      setPaymentError('')
+    }
+
+    if (manualWhatsAppLink) {
+      setManualWhatsAppLink('')
+    }
   }
 
-  const handleFormSubmit = (event) => {
+  const handleFormSubmit = async (event) => {
     event.preventDefault()
 
     if (!validateForm()) {
@@ -139,12 +175,85 @@ function QuickShopModal({
     }
 
     if (!resolvedProductName) {
-      alert('Product details are missing. Please try again.')
+      setPaymentError('Product details are missing. Please try again.')
       return
     }
 
     if (!sanitizedPhone) {
-      alert('WhatsApp number is not configured.')
+      setPaymentError('WhatsApp number is not configured.')
+      return
+    }
+
+    setIsProcessing(true)
+    setPaymentError('')
+    setManualWhatsAppLink('')
+
+    try {
+      const payload = {
+        name: formValues.name.trim(),
+        phone: formValues.phone.trim(),
+        address: formValues.address.trim(),
+        notes: formValues.notes.trim(),
+      }
+
+      // Save order to Firestore
+      const orderData = {
+        customerName: payload.name,
+        customerPhone: payload.phone,
+        customerAddress: payload.address,
+        productName: resolvedProductName,
+        productPrice: numericPrice,
+        productId: product?.id || '',
+        selectedSize: resolvedSize,
+        productImage: resolvedImageUrl,
+        paymentMethod: 'whatsapp',
+        paymentStatus: 'pending',
+        status: 'pending',
+        notes: payload.notes,
+      }
+
+      await createOrder(orderData)
+
+      persistCustomerDetails(payload)
+      if (onSubmit) {
+        onSubmit(payload)
+      }
+
+      const imageLine = resolvedImageUrl ? `\nImage: ${resolvedImageUrl}` : ''
+      const whatsappMessage = `Hi, I want to order:\nProduct: ${resolvedProductName}\nPrice: ₹${formattedPrice}\nSize: ${resolvedSize || 'N/A'}${imageLine}\n\n💳 Payment Status: Pending\n\nCustomer Details:\nName: ${payload.name}\nPhone: ${payload.phone}\nAddress: ${payload.address}\nNotes: ${payload.notes || 'N/A'}`
+      const whatsappLink = `https://wa.me/${sanitizedPhone}?text=${encodeURIComponent(whatsappMessage)}`
+
+      window.open(whatsappLink, '_blank', 'noopener,noreferrer')
+      onClose()
+      setFormValues(initialFormState)
+      setErrors(initialErrorState)
+    } catch (error) {
+      console.error('Error saving WhatsApp order:', error)
+      setPaymentError(error.message || 'Failed to save order. Please try again.')
+    } finally {
+      setIsProcessing(false)
+    }
+  }
+
+  const handlePaymentClick = async (event) => {
+    event.preventDefault()
+
+    if (!validateForm()) {
+      return
+    }
+
+    if (!resolvedProductName) {
+      setPaymentError('Product details are missing. Please try again.')
+      return
+    }
+
+    if (numericPrice <= 0) {
+      setPaymentError('Invalid product price.')
+      return
+    }
+
+    if (!sanitizedPhone) {
+      setPaymentError('WhatsApp number is not configured.')
       return
     }
 
@@ -155,18 +264,80 @@ function QuickShopModal({
       notes: formValues.notes.trim(),
     }
 
-    const imageLine = resolvedImageUrl ? `\nImage: ${resolvedImageUrl}` : ''
-    const whatsappMessage = `Hi, I want to order:\nProduct: ${resolvedProductName}\nPrice: ₹${formattedPrice}\nSize: ${resolvedSize || 'N/A'}${imageLine}\n\nCustomer Details:\nName: ${payload.name}\nPhone: ${payload.phone}\nAddress: ${payload.address}\nNotes: ${payload.notes || 'N/A'}`
-    const whatsappLink = `https://wa.me/${sanitizedPhone}?text=${encodeURIComponent(whatsappMessage)}`
+    setIsProcessing(true)
+    setPaymentError('')
+    setManualWhatsAppLink('')
 
-    persistCustomerDetails(payload)
-    if (onSubmit) {
-      onSubmit(payload)
+    try {
+      persistCustomerDetails(payload)
+
+      await initiatePayment({
+        amount: numericPrice,
+        productName: resolvedProductName,
+        customerName: payload.name,
+        customerPhone: payload.phone,
+        customerEmail: '',
+        productImage: resolvedImageUrl || '/logo.png',
+        onSuccess: async (response) => {
+          try {
+            // Save paid order to Firestore
+            const orderData = {
+              customerName: payload.name,
+              customerPhone: payload.phone,
+              customerAddress: payload.address,
+              productName: resolvedProductName,
+              productPrice: numericPrice,
+              productId: product?.id || '',
+              selectedSize: resolvedSize,
+              productImage: resolvedImageUrl,
+              paymentMethod: 'razorpay',
+              paymentStatus: 'paid',
+              status: 'processing',
+              razorpay_payment_id: response.paymentId,
+              razorpay_order_id: response.orderId,
+              notes: payload.notes,
+            }
+
+            await createOrder(orderData)
+
+            console.log('Payment successful and order saved:', response)
+            
+            // Send WhatsApp message BEFORE alert (alert can block popups)
+            const imageLine = resolvedImageUrl ? `\nImage: ${resolvedImageUrl}` : ''
+            const whatsappMessage = `Hi, I want to confirm my order:\nProduct: ${resolvedProductName}\nPrice: ₹${formattedPrice}\nSize: ${resolvedSize || 'N/A'}${imageLine}\n\n💳 Payment Status: Paid\nPayment ID: ${response.paymentId}\nOrder ID: ${response.orderId}\n\nCustomer Details:\nName: ${payload.name}\nPhone: ${payload.phone}\nAddress: ${payload.address}\nNotes: ${payload.notes || 'N/A'}`
+            const whatsappLink = `https://wa.me/${sanitizedPhone}?text=${encodeURIComponent(whatsappMessage)}`
+
+            const isOpened = openWhatsAppWithFallback(whatsappLink)
+
+            if (!isOpened) {
+              setManualWhatsAppLink(whatsappLink)
+              setPaymentError('Unable to open WhatsApp automatically. Click the button below to open in a new tab.')
+              return
+            }
+            
+            if (onSubmit) {
+              onSubmit(payload)
+            }
+
+            onClose()
+            setFormValues(initialFormState)
+            setErrors(initialErrorState)
+          } catch (error) {
+            console.error('Error saving paid order:', error)
+            alert('Payment successful, but failed to save order. Please contact support.')
+          }
+        },
+        onFailure: (error) => {
+          console.error('Payment failed:', error)
+          setPaymentError(error.message || 'Payment failed. Please try again.')
+        },
+      })
+    } catch (error) {
+      console.error('Payment initiation error:', error)
+      setPaymentError(error.message || 'Failed to initiate payment. Please try again.')
+    } finally {
+      setIsProcessing(false)
     }
-    window.open(whatsappLink, '_blank', 'noopener,noreferrer')
-    onClose()
-    setFormValues(initialFormState)
-    setErrors(initialErrorState)
   }
 
   return (
@@ -201,9 +372,10 @@ function QuickShopModal({
               type="text"
               value={formValues.name}
               onChange={handleInputChange}
+              disabled={isProcessing}
               className={`mt-1.5 w-full rounded-xl border bg-white px-3.5 py-2.5 text-sm outline-none transition ${
                 errors.name ? 'border-red-400' : 'border-black/15 focus:border-obsidian'
-              }`}
+              } ${isProcessing ? 'opacity-50' : ''}`}
               placeholder="Enter your full name"
             />
             {errors.name && <p className="mt-1 text-xs text-red-600">{errors.name}</p>}
@@ -219,9 +391,10 @@ function QuickShopModal({
               type="tel"
               value={formValues.phone}
               onChange={handleInputChange}
+              disabled={isProcessing}
               className={`mt-1.5 w-full rounded-xl border bg-white px-3.5 py-2.5 text-sm outline-none transition ${
                 errors.phone ? 'border-red-400' : 'border-black/15 focus:border-obsidian'
-              }`}
+              } ${isProcessing ? 'opacity-50' : ''}`}
               placeholder="Enter your phone number"
             />
             {errors.phone && <p className="mt-1 text-xs text-red-600">{errors.phone}</p>}
@@ -240,9 +413,10 @@ function QuickShopModal({
               rows={3}
               value={formValues.address}
               onChange={handleInputChange}
+              disabled={isProcessing}
               className={`mt-1.5 w-full rounded-xl border bg-white px-3.5 py-2.5 text-sm outline-none transition ${
                 errors.address ? 'border-red-400' : 'border-black/15 focus:border-obsidian'
-              }`}
+              } ${isProcessing ? 'opacity-50' : ''}`}
               placeholder="Enter delivery address"
             />
             {errors.address && <p className="mt-1 text-xs text-red-600">{errors.address}</p>}
@@ -258,24 +432,57 @@ function QuickShopModal({
               rows={2}
               value={formValues.notes}
               onChange={handleInputChange}
-              className="mt-1.5 w-full rounded-xl border border-black/15 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-obsidian"
+              disabled={isProcessing}
+              className={`mt-1.5 w-full rounded-xl border border-black/15 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-obsidian ${
+                isProcessing ? 'opacity-50' : ''
+              }`}
               placeholder="Any special requests"
             />
           </div>
 
-          <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end">
+          {paymentError && (
+            <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
+              {paymentError}
+            </div>
+          )}
+
+          {manualWhatsAppLink && (
+            <a
+              href={manualWhatsAppLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex w-full items-center justify-center rounded-xl bg-[#25D366] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#1EBE5D]"
+            >
+              Open WhatsApp in New Tab
+            </a>
+          )}
+
+          <div className="flex flex-col gap-2 pt-2">
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={isProcessing}
+                className="inline-flex items-center justify-center rounded-xl border border-black/15 px-4 py-2.5 text-sm font-semibold text-black/75 transition hover:bg-black/5 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isProcessing}
+                className="inline-flex items-center justify-center rounded-xl bg-[#25D366] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#1EBE5D] disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isProcessing ? 'Processing...' : 'Send on WhatsApp'}
+              </button>
+            </div>
+
             <button
               type="button"
-              onClick={onClose}
-              className="inline-flex items-center justify-center rounded-xl border border-black/15 px-4 py-2.5 text-sm font-semibold text-black/75 transition hover:bg-black/5"
+              onClick={handlePaymentClick}
+              disabled={isProcessing}
+              className="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed w-full"
             >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="inline-flex items-center justify-center rounded-xl bg-[#25D366] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#1EBE5D]"
-            >
-              Send on WhatsApp
+              {isProcessing ? 'Processing Payment...' : '💳 Pay Now with Razorpay'}
             </button>
           </div>
         </form>

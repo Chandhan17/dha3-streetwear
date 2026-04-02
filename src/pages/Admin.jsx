@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import clientConfig from '../config'
 import Footer from '../components/Footer'
 import Navbar from '../components/Navbar'
+import AdminOrders from '../components/AdminOrders'
 import { logoutAdmin } from '../services/authService'
 import { uploadImage } from '../services/uploadService'
 import {
@@ -70,6 +71,7 @@ function mergeImageFiles(currentFiles, incomingFiles) {
 function Admin() {
   const navigate = useNavigate()
 
+  const [activeTab, setActiveTab] = useState('products')
   const [products, setProducts] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
@@ -356,6 +358,33 @@ function Admin() {
       />
 
       <main className="mx-auto w-full max-w-7xl space-y-8 px-4 pb-14 pt-6 md:px-8 md:pt-10">
+        {/* Admin Tabs */}
+        <div className="flex border-b border-black/10">
+          <button
+            onClick={() => setActiveTab('products')}
+            className={`px-4 py-3 text-sm font-semibold transition ${
+              activeTab === 'products'
+                ? 'border-b-2 border-obsidian text-obsidian'
+                : 'text-black/60 hover:text-obsidian'
+            }`}
+          >
+            Products
+          </button>
+          <button
+            onClick={() => setActiveTab('orders')}
+            className={`px-4 py-3 text-sm font-semibold transition ${
+              activeTab === 'orders'
+                ? 'border-b-2 border-obsidian text-obsidian'
+                : 'text-black/60 hover:text-obsidian'
+            }`}
+          >
+            Orders
+          </button>
+        </div>
+
+        {/* Products Tab */}
+        {activeTab === 'products' && (
+          <>
         <section className="luxury-panel p-6 md:p-8">
           <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -792,6 +821,15 @@ function Admin() {
             </div>
           )}
         </section>
+          </>
+        )}
+
+        {/* Orders Tab */}
+        {activeTab === 'orders' && (
+          <div className="rounded-xl border border-black/10 bg-white p-6 md:p-8">
+            <AdminOrders />
+          </div>
+        )}
       </main>
 
       <Footer />
