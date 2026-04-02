@@ -8,6 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "start": "node server.js",
     "server": "node server.js",
     "server:dev": "node --watch server.js"
   },
