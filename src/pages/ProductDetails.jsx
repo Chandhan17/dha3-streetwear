@@ -5,24 +5,28 @@ import ImageGallery from '../components/ImageGallery'
 import Navbar from '../components/Navbar'
 import QuickShopModal from '../components/QuickShopModal'
 import SizeSelector from '../components/SizeSelector'
+import BrandedNotification from '../components/BrandedNotification'
+import { useBrandedNotification } from '../hooks/useBrandedNotification'
 import { fetchProductById } from '../services/productService'
 
 function ProductDetails() {
   const { id } = useParams()
   const [product, setProduct] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
-  const [errorMessage, setErrorMessage] = useState('')
+  const [pageError, setPageError] = useState('')
   const [selectedSize, setSelectedSize] = useState('')
   const [selectedImage, setSelectedImage] = useState('')
   const [isQuickShopModalOpen, setIsQuickShopModalOpen] = useState(false)
   const [failedSizeChartImage, setFailedSizeChartImage] = useState('')
+  const { errorMessage, showError, clearError } = useBrandedNotification()
 
   useEffect(() => {
     let isMounted = true
 
     const loadProduct = async () => {
       setIsLoading(true)
-      setErrorMessage('')
+      setPageError('')
+      clearError()
 
       try {
         const productData = await fetchProductById(id)
@@ -32,7 +36,8 @@ function ProductDetails() {
         }
 
         if (!productData) {
-          setErrorMessage('Product not found.')
+          setPageError('Product not found.')
+          showError('Product not found')
           return
         }
 
@@ -42,7 +47,8 @@ function ProductDetails() {
         )
       } catch {
         if (isMounted) {
-          setErrorMessage('Unable to load product details. Please try again.')
+          setPageError('Unable to load product details. Please try again.')
+          showError('Unable to load product details. Please try again')
         }
       } finally {
         if (isMounted) {
@@ -95,11 +101,12 @@ function ProductDetails() {
 
   const handleQuickShop = () => {
     if (!product) {
+      showError('Product not found')
       return
     }
 
     if (hasSizes && !selectedSize) {
-      alert('Please select a size')
+      showError('Please select a size')
       return
     }
 
@@ -108,6 +115,7 @@ function ProductDetails() {
 
   return (
     <div className="min-h-screen">
+      <BrandedNotification message={errorMessage} />
       <Navbar />
 
       <main className="mx-auto w-full max-w-[1200px] space-y-8 px-4 pb-16 pt-8 md:px-6 md:pt-12">
@@ -118,9 +126,9 @@ function ProductDetails() {
           </section>
         )}
 
-        {!isLoading && errorMessage && (
+        {!isLoading && pageError && (
           <div className="luxury-panel px-4 py-10 text-center text-sm text-red-700">
-            {errorMessage}
+            {pageError}
           </div>
         )}
 

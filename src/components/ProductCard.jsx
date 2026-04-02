@@ -6,6 +6,7 @@ function ProductCard({
   showNewTag = false,
   discountLabel = '',
   onQuickShopClick,
+  onError,
 }) {
   const navigate = useNavigate()
   const [selectedSize, setSelectedSize] = useState('')
@@ -34,7 +35,9 @@ function ProductCard({
     event.stopPropagation()
 
     if (hasSizes && !selectedSize) {
-      alert('Please select a size')
+      if (onError) {
+        onError('Please select a size')
+      }
       return
     }
 

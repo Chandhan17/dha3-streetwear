@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import Filters from '../components/Filters'
+import BrandedNotification from '../components/BrandedNotification'
 import Footer from '../components/Footer'
 import Hero from '../components/Hero'
 import Navbar from '../components/Navbar'
 import ProductCard from '../components/ProductCard'
 import QuickShopModal from '../components/QuickShopModal'
 import clientConfig from '../config'
+import { useBrandedNotification } from '../hooks/useBrandedNotification'
 import { fetchProducts } from '../services/productService'
 
 const FALLBACK_CATEGORY = 'Uncategorized'
@@ -54,7 +56,6 @@ function matchesPriceRange(price, selectedPriceRange) {
 function Home() {
   const [products, setProducts] = useState([])
   const [isLoading, setIsLoading] = useState(true)
-  const [errorMessage, setErrorMessage] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [isFiltersOpen, setIsFiltersOpen] = useState(false)
 
@@ -67,6 +68,7 @@ function Home() {
   const [draftPriceRange, setDraftPriceRange] = useState('all')
   const [selectedProduct, setSelectedProduct] = useState(null)
   const [showModal, setShowModal] = useState(false)
+  const { errorMessage, showError, clearError } = useBrandedNotification()
 
   const filteredProducts = useMemo(() => {
     const normalizedQuery = normalizeValue(searchQuery)
@@ -143,16 +145,20 @@ function Home() {
 
   const loadProducts = async (forceRefresh = false) => {
     setIsLoading(true)
-    setErrorMessage('')
+    clearError()
 
     try {
       const productList = await fetchProducts({ forceRefresh })
       setProducts(productList)
     } catch {
-      setErrorMessage('Failed to load products. Please refresh and try again.')
+      showError('Failed to load products. Please refresh and try again')
     } finally {
       setIsLoading(false)
     }
+  }
+
+  const handleProductCardError = (message) => {
+    showError(message)
   }
 
   useEffect(() => {
@@ -225,6 +231,7 @@ function Home() {
 
   return (
     <div className="min-h-screen">
+      <BrandedNotification message={errorMessage} />
       <Navbar />
       <Hero />
 
@@ -294,12 +301,6 @@ function Home() {
           </div>
         </div>
 
-        {errorMessage && (
-          <div className="mb-6 rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {errorMessage}
-          </div>
-        )}
-
         {isLoading && (
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
             {[...Array(8)].map((_, index) => (
@@ -344,6 +345,7 @@ function Home() {
                       showNewTag={index < 2}
                       discountLabel={Number(product.price || 0) >= 2000 ? '10% OFF' : ''}
                       onQuickShopClick={handleQuickShopClick}
+                      onError={handleProductCardError}
                     />
                   ))}
                 </div>
