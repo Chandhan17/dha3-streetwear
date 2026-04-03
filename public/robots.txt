@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /login
+
+# Sitemap
+Sitemap: https://brothersfashion.vercel.app/sitemap.xml
