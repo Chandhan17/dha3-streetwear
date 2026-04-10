@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Playfair+Display:wght@600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Anton&family=Sora:wght@400;500;600;700;800&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -9,25 +9,179 @@
     @apply box-border;
   }
 
+  *::before,
+  *::after {
+    @apply box-border;
+  }
+
   body {
-    @apply m-0 min-h-screen bg-canvas font-sans text-ink antialiased;
-    background-image:
-      radial-gradient(circle at 10% -10%, rgba(196, 141, 47, 0.12), transparent 30%),
-      radial-gradient(circle at 90% 0%, rgba(0, 0, 0, 0.06), transparent 35%),
-      linear-gradient(180deg, #fbfaf7 0%, #f3efe7 100%);
+    @apply m-0 min-h-screen bg-canvas font-sans text-white antialiased;
+    background: #000;
+    text-rendering: optimizeLegibility;
   }
 
   #root {
     @apply min-h-screen;
   }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  button,
+  a,
+  input,
+  textarea,
+  select {
+    transition-duration: 280ms;
+    transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
 }
 
 @layer components {
+  .surface-elevated {
+    @apply shadow-card transition-shadow duration-300 hover:shadow-elevated;
+  }
+
+  .interactive-lift {
+    @apply transition duration-300 hover:-translate-y-1;
+  }
+
+  .button-polish {
+    @apply rounded-full border px-5 py-2.5 text-[10px] font-bold uppercase tracking-[0.2em] transition duration-300;
+  }
+
+  .street-panel {
+    @apply border border-white/10 bg-white/[0.03];
+  }
+
   .luxury-panel {
-    @apply rounded-3xl border border-black/10 bg-white/90 shadow-card backdrop-blur-sm;
+    @apply border border-white/10 bg-white/[0.03];
   }
 
   .chip {
-    @apply rounded-full border border-black/10 bg-white px-4 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-black/70;
+    @apply border border-white/20 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.24em] text-white/75;
+  }
+
+  /* Premium Button Styles */
+  .btn-primary {
+    @apply inline-block rounded-full border-2 border-white px-8 py-3 font-bold uppercase tracking-widest text-white transition duration-300 hover:bg-white hover:text-black;
+  }
+
+  .btn-secondary {
+    @apply inline-block rounded-full border-2 border-white/30 px-8 py-3 font-bold uppercase tracking-widest text-white transition duration-300 hover:border-white hover:bg-white/10;
+  }
+
+  .btn-dark {
+    @apply inline-block rounded-full border-2 border-black px-8 py-3 font-bold uppercase tracking-widest text-black transition duration-300 hover:bg-black hover:text-white;
+  }
+
+  .btn-light {
+    @apply inline-block rounded-full border-2 border-black/30 px-8 py-3 font-bold uppercase tracking-widest text-black transition duration-300 hover:border-black hover:bg-black/10;
+  }
+
+  /* Section Spacing */
+  .section-hero {
+    @apply relative isolate w-full py-16 md:py-24 lg:py-32;
+  }
+
+  .section-alt {
+    @apply relative isolate w-full bg-white py-16 md:py-24 lg:py-32 text-black;
+  }
+
+  .section-dark {
+    @apply relative isolate w-full bg-black py-16 md:py-24 lg:py-32 text-white;
+  }
+
+  .container-section {
+    @apply mx-auto max-w-[1200px] px-4 md:px-6;
+  }
+
+  .content-stack {
+    @apply space-y-6 md:space-y-8;
+  }
+
+  /* Typography Utilities */
+  .heading-hero {
+    @apply font-display text-5xl leading-[0.92] uppercase tracking-[0.02em] md:text-7xl lg:text-8xl;
+  }
+
+  .heading-lg {
+    @apply font-display text-3xl uppercase leading-[0.94] tracking-[0.02em] md:text-5xl lg:text-6xl;
+  }
+
+  .heading-md {
+    @apply font-display text-2xl uppercase leading-[0.96] tracking-[0.02em] md:text-3xl lg:text-4xl;
+  }
+
+  .subheading {
+    @apply text-[10px] font-bold uppercase tracking-[0.24em];
+  }
+
+  .body-lg {
+    @apply text-base leading-relaxed md:text-lg lg:text-xl;
+  }
+
+  .body-md {
+    @apply text-sm leading-relaxed text-white/70 md:text-base;
+  }
+
+  .hero-fade-in {
+    animation: heroFadeIn 1.05s ease-out both;
+  }
+
+  .hero-bg-zoom {
+    animation: heroBgZoom 16s ease-out both;
+    transform-origin: center;
+    will-change: transform;
+  }
+
+  .size-shake {
+    animation: sizeShake 320ms ease-in-out;
   }
 }
+
+@keyframes heroFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes heroBgZoom {
+  from {
+    transform: scale(1.08);
+  }
+
+  to {
+    transform: scale(1);
+  }
+}
+
+@keyframes sizeShake {
+  0% {
+    transform: translateX(0);
+  }
+
+  25% {
+    transform: translateX(-4px);
+  }
+
+  50% {
+    transform: translateX(4px);
+  }
+
+  75% {
+    transform: translateX(-3px);
+  }
+
+  100% {
+    transform: translateX(0);
+  }
+}
+

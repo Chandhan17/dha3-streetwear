@@ -30,7 +30,7 @@ function ImageGallery({
 
   if (normalizedImages.length === 0) {
     return (
-      <div className="luxury-panel grid min-h-[420px] place-items-center text-sm text-black/55">
+      <div className="luxury-panel grid min-h-[420px] place-items-center text-sm text-white/55">
         Image unavailable
       </div>
     )
@@ -50,7 +50,7 @@ function ImageGallery({
               className={`shrink-0 overflow-hidden rounded-xl border transition duration-300 md:w-full ${
                 isActive
                   ? 'scale-[1.02] border-obsidian shadow-soft'
-                  : 'border-black/10 hover:border-black/35 hover:shadow-soft'
+                  : 'border-white/10 hover:border-white/25 hover:shadow-soft'
               }`}
             >
               <img
@@ -58,6 +58,7 @@ function ImageGallery({
                 alt={`${resolvedProductName} thumbnail ${index + 1}`}
                 className="h-20 w-20 object-cover md:h-24 md:w-full"
                 loading="lazy"
+                sizes="(min-width: 768px) 96px, 80px"
                 decoding="async"
               />
             </button>
@@ -68,7 +69,7 @@ function ImageGallery({
       <div className="order-1 luxury-panel group overflow-hidden md:order-2">
         <div className="aspect-square bg-black/[0.04]">
           {hasPrimaryImageError ? (
-            <div className="grid h-full place-items-center px-4 text-center text-sm text-black/55">
+            <div className="grid h-full place-items-center px-4 text-center text-sm text-white/55">
               Unable to load this image. Please select another thumbnail.
             </div>
           ) : (
@@ -77,6 +78,9 @@ function ImageGallery({
               alt={resolvedProductName}
               onError={() => setFailedPrimaryImage(primaryImage)}
               className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
+              loading="eager"
+              fetchPriority="high"
+              sizes="(min-width: 768px) 60vw, 100vw"
               decoding="async"
             />
           )}

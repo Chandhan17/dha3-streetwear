@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import BrandedNotification from './BrandedNotification'
 import clientConfig from '../config'
 import { useBrandedNotification } from '../hooks/useBrandedNotification'
+import { auth } from '../firebase'
 import { initiatePayment } from '../services/paymentService'
 import { createOrder } from '../services/orderService'
 
@@ -136,7 +137,7 @@ function QuickShopModal({
   const resolvedImageUrl = String(
     product?.imageUrl || product?.image || product?.images?.[0] || '',
   ).trim()
-  const sanitizedPhone = String(clientConfig.whatsappNumber || '').replace(/\D/g, '')
+  const sanitizedPhone = String(clientConfig.whatsapp || clientConfig.whatsappNumber || '').replace(/\D/g, '')
 
   useEffect(() => {
     if (!modalOpen) {
@@ -330,7 +331,20 @@ function QuickShopModal({
       persistCustomerDetails(payload)
 
       await initiatePayment({
-        amount: numericPrice,
+        productId: product?.id || '',
+        quantity: 1,
+        userId: auth.currentUser?.uid || 'guest',
+        customerDetails: {
+          name: payload.name,
+          phone: payload.phone,
+          doorNo: payload.doorNo,
+          street: payload.street,
+          city: payload.city,
+          pincode: payload.pincode,
+          state: payload.state,
+          notes: payload.notes,
+          address: fullAddress,
+        },
         productName: resolvedProductName,
         customerName: payload.name,
         customerPhone: payload.phone,
@@ -338,32 +352,7 @@ function QuickShopModal({
         productImage: resolvedImageUrl || '/logo.png',
         onSuccess: async (response) => {
           try {
-            // Save paid order to Firestore
-            const orderData = {
-              customerName: payload.name,
-              customerPhone: payload.phone,
-              customerAddress: fullAddress,
-              customerDoorNo: payload.doorNo,
-              customerStreet: payload.street,
-              customerCity: payload.city,
-              customerPincode: payload.pincode,
-              customerState: payload.state,
-              productName: resolvedProductName,
-              productPrice: numericPrice,
-              productId: product?.id || '',
-              selectedSize: resolvedSize,
-              productImage: resolvedImageUrl,
-              paymentMethod: 'razorpay',
-              paymentStatus: 'paid',
-              status: 'processing',
-              razorpay_payment_id: response.paymentId,
-              razorpay_order_id: response.orderId,
-              notes: payload.notes,
-            }
-
-            await createOrder(orderData)
-
-            console.log('Payment successful and order saved:', response)
+            showError('Payment successful and order saved', 'success')
             
             // Send WhatsApp message BEFORE alert (alert can block popups)
             const imageLine = resolvedImageUrl ? `\nImage: ${resolvedImageUrl}` : ''
@@ -405,20 +394,20 @@ function QuickShopModal({
 
   return (
     <div
-      className="fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-black/65 p-4 sm:items-center"
+      className="fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-black/80 p-4 sm:items-center"
       onClick={onClose}
     >
       <BrandedNotification message={errorMessage} />
       <div
-        className="flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white p-5 shadow-2xl md:p-6"
+        className="flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#0b0b0b] p-5 shadow-2xl md:p-6"
         role="dialog"
         aria-modal="true"
-        aria-label="Quick shop customer details"
+        aria-label="Buy now customer details"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="mb-5 shrink-0">
-          <h2 className="font-display text-2xl text-obsidian">Quick Shop</h2>
-          <p className="mt-2 text-sm leading-relaxed text-black/70">
+          <h2 className="font-display text-2xl text-white">Buy Now</h2>
+          <p className="mt-2 text-sm leading-relaxed text-white/70">
             Confirm your details to place order for {resolvedProductName || 'this product'}
             {' '}
             (Rs. {formattedPrice}, Size: {resolvedSize || 'N/A'}).
@@ -435,8 +424,8 @@ function QuickShopModal({
               value={formValues.name}
               onChange={handleInputChange}
               disabled={isProcessing}
-              className={`mt-1.5 w-full rounded-xl border bg-white px-3.5 py-2.5 text-sm outline-none transition ${
-                errors.name ? 'border-red-400' : 'border-black/15 focus:border-obsidian'
+              className={`mt-1.5 w-full rounded-xl border bg-black/60 px-3.5 py-2.5 text-sm text-white outline-none transition placeholder:text-white/35 ${
+                errors.name ? 'border-red-400' : 'border-white/15 focus:border-white/35'
               } ${isProcessing ? 'opacity-50' : ''}`}
               placeholder="Name"
             />
@@ -451,8 +440,8 @@ function QuickShopModal({
               value={formValues.phone}
               onChange={handleInputChange}
               disabled={isProcessing}
-              className={`mt-1.5 w-full rounded-xl border bg-white px-3.5 py-2.5 text-sm outline-none transition ${
-                errors.phone ? 'border-red-400' : 'border-black/15 focus:border-obsidian'
+              className={`mt-1.5 w-full rounded-xl border bg-black/60 px-3.5 py-2.5 text-sm text-white outline-none transition placeholder:text-white/35 ${
+                errors.phone ? 'border-red-400' : 'border-white/15 focus:border-white/35'
               } ${isProcessing ? 'opacity-50' : ''}`}
               placeholder="Phone"
             />
@@ -467,8 +456,8 @@ function QuickShopModal({
               value={formValues.doorNo}
               onChange={handleInputChange}
               disabled={isProcessing}
-              className={`mt-1.5 w-full rounded-xl border bg-white px-3.5 py-2.5 text-sm outline-none transition ${
-                errors.doorNo ? 'border-red-400' : 'border-black/15 focus:border-obsidian'
+              className={`mt-1.5 w-full rounded-xl border bg-black/60 px-3.5 py-2.5 text-sm text-white outline-none transition placeholder:text-white/35 ${
+                errors.doorNo ? 'border-red-400' : 'border-white/15 focus:border-white/35'
               } ${isProcessing ? 'opacity-50' : ''}`}
               placeholder="Door No"
             />
@@ -483,8 +472,8 @@ function QuickShopModal({
               value={formValues.street}
               onChange={handleInputChange}
               disabled={isProcessing}
-              className={`mt-1.5 w-full rounded-xl border bg-white px-3.5 py-2.5 text-sm outline-none transition ${
-                errors.street ? 'border-red-400' : 'border-black/15 focus:border-obsidian'
+              className={`mt-1.5 w-full rounded-xl border bg-black/60 px-3.5 py-2.5 text-sm text-white outline-none transition placeholder:text-white/35 ${
+                errors.street ? 'border-red-400' : 'border-white/15 focus:border-white/35'
               } ${isProcessing ? 'opacity-50' : ''}`}
               placeholder="Street Name"
             />
@@ -500,8 +489,8 @@ function QuickShopModal({
                 value={formValues.city}
                 onChange={handleInputChange}
                 disabled={isProcessing}
-                className={`mt-1.5 w-full rounded-xl border bg-white px-3.5 py-2.5 text-sm outline-none transition ${
-                  errors.city ? 'border-red-400' : 'border-black/15 focus:border-obsidian'
+                className={`mt-1.5 w-full rounded-xl border bg-black/60 px-3.5 py-2.5 text-sm text-white outline-none transition placeholder:text-white/35 ${
+                  errors.city ? 'border-red-400' : 'border-white/15 focus:border-white/35'
                 } ${isProcessing ? 'opacity-50' : ''}`}
                 placeholder="City"
               />
@@ -516,8 +505,8 @@ function QuickShopModal({
                 value={formValues.pincode}
                 onChange={handleInputChange}
                 disabled={isProcessing}
-                className={`mt-1.5 w-full rounded-xl border bg-white px-3.5 py-2.5 text-sm outline-none transition ${
-                  errors.pincode ? 'border-red-400' : 'border-black/15 focus:border-obsidian'
+                className={`mt-1.5 w-full rounded-xl border bg-black/60 px-3.5 py-2.5 text-sm text-white outline-none transition placeholder:text-white/35 ${
+                  errors.pincode ? 'border-red-400' : 'border-white/15 focus:border-white/35'
                 } ${isProcessing ? 'opacity-50' : ''}`}
                 placeholder="Pincode"
               />
@@ -533,8 +522,8 @@ function QuickShopModal({
                 value={formValues.state}
                 onChange={handleInputChange}
                 disabled={isProcessing}
-                className={`mt-1.5 w-full rounded-xl border bg-white px-3.5 py-2.5 text-sm outline-none transition ${
-                  errors.state ? 'border-red-400' : 'border-black/15 focus:border-obsidian'
+                className={`mt-1.5 w-full rounded-xl border bg-black/60 px-3.5 py-2.5 text-sm text-white outline-none transition placeholder:text-white/35 ${
+                  errors.state ? 'border-red-400' : 'border-white/15 focus:border-white/35'
                 } ${isProcessing ? 'opacity-50' : ''}`}
                 placeholder="State"
               />
@@ -542,7 +531,7 @@ function QuickShopModal({
             </div>
 
             <div>
-            <label htmlFor="customerNotes" className="text-sm font-semibold text-obsidian">
+            <label htmlFor="customerNotes" className="text-sm font-semibold text-white">
               Notes (Optional)
             </label>
             <textarea
@@ -552,7 +541,7 @@ function QuickShopModal({
               value={formValues.notes}
               onChange={handleInputChange}
               disabled={isProcessing}
-              className={`mt-1.5 w-full rounded-xl border border-black/15 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-obsidian ${
+              className={`mt-1.5 w-full rounded-xl border border-white/15 bg-black/60 px-3.5 py-2.5 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-white/35 ${
                 isProcessing ? 'opacity-50' : ''
               }`}
               placeholder="Any special requests"
@@ -571,13 +560,13 @@ function QuickShopModal({
             )}
           </div>
 
-          <div className="mt-3 shrink-0 flex flex-col gap-2 border-t border-black/10 bg-white pt-3">
+          <div className="mt-3 shrink-0 flex flex-col gap-2 border-t border-white/10 bg-[#0b0b0b] pt-3">
             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <button
                 type="button"
                 onClick={onClose}
                 disabled={isProcessing}
-                className="inline-flex items-center justify-center rounded-xl border border-black/15 px-4 py-2.5 text-sm font-semibold text-black/75 transition hover:bg-black/5 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="inline-flex items-center justify-center rounded-full border border-white/15 px-4 py-2.5 text-sm font-semibold text-white/75 transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Cancel
               </button>
@@ -594,9 +583,9 @@ function QuickShopModal({
               type="button"
               onClick={handlePaymentClick}
               disabled={isProcessing}
-              className="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed w-full"
+              className="inline-flex w-full items-center justify-center rounded-full border border-white/15 bg-white px-4 py-2.5 text-sm font-semibold text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {isProcessing ? 'Processing Payment...' : '💳 Pay Now with Razorpay'}
+              {isProcessing ? 'Processing Payment...' : 'Pay Now with Razorpay'}
             </button>
           </div>
         </form>

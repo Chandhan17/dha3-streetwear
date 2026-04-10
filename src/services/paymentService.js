@@ -3,26 +3,31 @@
  * Handles order creation, payment processing, and verification
  */
 
-const API_URL = import.meta.env.VITE_RAZORPAY_API_URL || 'http://localhost:5000'
+import clientConfig from '../config'
+
+const API_URL = String(import.meta.env.VITE_API_URL || '').trim()
+
+function getApiUrl() {
+  if (!API_URL) {
+    throw new Error('Missing VITE_API_URL environment variable')
+  }
+
+  return API_URL
+}
 
 /**
- * Create a Razorpay order from the backend
- * @param {number} amount - Amount in INR
- * @param {string} productName - Product name
+ * Create a Razorpay order from the backend using server-side product pricing.
+ * @param {Object} payload - Order creation payload
  * @returns {Promise<{orderId: string, amount: number, currency: string}>}
  */
-export const createOrder = async (amount, productName) => {
+export const createOrder = async (payload) => {
   try {
-    const response = await fetch(`${API_URL}/api/create-order`, {
+    const response = await fetch(`${getApiUrl()}/api/create-order`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        amount,
-        currency: 'INR',
-        productName,
-      }),
+      body: JSON.stringify(payload),
     })
 
     if (!response.ok) {
@@ -51,7 +56,7 @@ export const createOrder = async (amount, productName) => {
  */
 export const verifyPayment = async (orderId, paymentId, signature) => {
   try {
-    const response = await fetch(`${API_URL}/api/verify-payment`, {
+    const response = await fetch(`${getApiUrl()}/api/verify-payment`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -81,6 +86,38 @@ export const verifyPayment = async (orderId, paymentId, signature) => {
 }
 
 /**
+ * Store verified order details in backend datastore.
+ * @param {Object} payload - Store order payload
+ * @returns {Promise<{success: boolean, orderDocumentId?: string}>}
+ */
+export const storeVerifiedOrder = async (payload) => {
+  try {
+    const response = await fetch(`${getApiUrl()}/api/store-order`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    })
+
+    if (!response.ok) {
+      throw new Error(`Failed to store order: ${response.statusText}`)
+    }
+
+    const data = await response.json()
+
+    if (!data.success) {
+      throw new Error(data.error || 'Failed to store order')
+    }
+
+    return data
+  } catch (error) {
+    console.error('Error storing verified order:', error)
+    throw error
+  }
+}
+
+/**
  * Open Razorpay checkout and handle payment
  * @param {Object} options - Payment options
  * @param {number} options.amount - Amount in INR
@@ -94,7 +131,11 @@ export const verifyPayment = async (orderId, paymentId, signature) => {
  * @returns {Promise<void>}
  */
 export const initiatePayment = async ({
-  amount,
+  productId,
+  quantity = 1,
+  items = [],
+  userId = 'guest',
+  customerDetails = {},
   productName,
   customerName,
   customerPhone,
@@ -104,18 +145,34 @@ export const initiatePayment = async ({
   onFailure,
 }) => {
   try {
-    // Validate inputs
-    if (!amount || amount <= 0) {
-      throw new Error('Invalid amount')
-    }
-
     if (!customerName || !customerPhone) {
       throw new Error('Customer name and phone are required')
     }
 
-    // Step 1: Create order on backend
-    const orderData = await createOrder(amount, productName)
-    const { orderId, amount: orderAmount } = orderData
+    const normalizedItems = Array.isArray(items)
+      ? items
+          .map((item) => ({
+            productId: String(item?.productId || '').trim(),
+            quantity: Math.max(1, Number(item?.quantity || 1)),
+            selectedSize: String(item?.selectedSize || 'N/A').trim() || 'N/A',
+          }))
+          .filter((item) => Boolean(item.productId))
+      : []
+
+    if (!productId && normalizedItems.length === 0) {
+      throw new Error('Product details are required to create payment order')
+    }
+
+    // Step 1: Create order on backend using server-priced products.
+    const orderData = await createOrder({
+      productId,
+      quantity,
+      items: normalizedItems,
+      userId,
+      customerDetails,
+      currency: 'INR',
+    })
+    const { orderId, amount: orderAmount, totalAmount } = orderData
 
     // Step 2: Check if Razorpay is loaded
     if (!window.Razorpay) {
@@ -127,7 +184,7 @@ export const initiatePayment = async ({
       key: import.meta.env.VITE_RAZORPAY_KEY_ID,
       amount: orderAmount, // Amount already in paise from backend
       currency: 'INR',
-      name: 'Brothers Fashion Hub',
+      name: clientConfig.brandName,
       description: productName,
       image: productImage,
       order_id: orderId,
@@ -142,12 +199,18 @@ export const initiatePayment = async ({
           )
 
           if (verificationResult.success) {
+            const storeOrderResult = await storeVerifiedOrder({
+              orderId: response.razorpay_order_id,
+              orderStatus: 'processing',
+            })
+
             // Payment verified successfully
             if (typeof onSuccess === 'function') {
               onSuccess({
                 paymentId: response.razorpay_payment_id,
                 orderId: response.razorpay_order_id,
-                amount,
+                amount: Number(totalAmount || 0),
+                orderDocumentId: storeOrderResult.orderDocumentId || '',
               })
             }
           }
@@ -200,7 +263,7 @@ export const initiatePayment = async ({
  */
 export const storeOrderData = async (orderData) => {
   try {
-    const response = await fetch(`${API_URL}/api/store-order`, {
+    const response = await fetch(`${getApiUrl()}/api/store-order`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -223,6 +286,7 @@ export const storeOrderData = async (orderData) => {
 export default {
   createOrder,
   verifyPayment,
+  storeVerifiedOrder,
   initiatePayment,
   storeOrderData,
 }

@@ -28,12 +28,41 @@ function normalizeCategory(category) {
 }
 
 function normalizeSizes(sizes) {
+  const normalizeSizeValue = (value) => {
+    if (typeof value === 'string' || typeof value === 'number') {
+      return String(value).trim()
+    }
+
+    if (value && typeof value === 'object') {
+      const candidate = value.size ?? value.value ?? value.label
+      return typeof candidate === 'string' || typeof candidate === 'number'
+        ? String(candidate).trim()
+        : ''
+    }
+
+    return ''
+  }
+
+  if (typeof sizes === 'string') {
+    return sizes
+      .split(',')
+      .map((size) => String(size || '').trim())
+      .filter((size) => Boolean(size))
+  }
+
+  if (sizes && typeof sizes === 'object' && !Array.isArray(sizes)) {
+    return Object.entries(sizes)
+      .filter(([, isEnabled]) => Boolean(isEnabled))
+      .map(([size]) => String(size || '').trim())
+      .filter((size) => Boolean(size))
+  }
+
   if (!Array.isArray(sizes)) {
     return FALLBACK_SIZES
   }
 
   return sizes
-    .map((size) => String(size || '').trim())
+    .map((size) => normalizeSizeValue(size))
     .filter((size) => Boolean(size))
 }
 

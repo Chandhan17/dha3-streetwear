@@ -15,9 +15,9 @@ function SizeChart({ category = '' }) {
 
   return (
     <section className="luxury-panel p-5 md:p-6">
-      <h2 className="font-display text-2xl text-obsidian md:text-3xl">Size Chart</h2>
+      <h2 className="font-display text-2xl text-white md:text-3xl">Size Chart</h2>
 
-      <div className="mt-4 overflow-x-auto rounded-2xl border border-black/10 bg-white">
+      <div className="mt-4 overflow-x-auto rounded-2xl border border-white/10 bg-[#0b0b0b]">
         {!isShoesCategory && (
           <table className="min-w-full border-collapse text-left text-sm">
             <thead>

@@ -1,35 +1,47 @@
-import { useState } from 'react'
 import clientConfig from '../config'
 
 function Hero() {
-  const [hasHeroImageError, setHasHeroImageError] = useState(false)
-  const heroImagePosition = clientConfig.heroImagePosition || 'center'
+  const hasVideo = Boolean(clientConfig.heroVideo)
 
   return (
-    <section className="relative isolate w-full overflow-hidden bg-black">
-      {!hasHeroImageError && (
-        <img
-          src={clientConfig.heroImage}
-          alt={clientConfig.shopName}
-          className="absolute inset-0 h-full w-full object-cover"
-          style={{ objectPosition: heroImagePosition }}
-          loading="eager"
-          decoding="async"
-          onError={() => setHasHeroImageError(true)}
-        />
-      )}
-      <div className="absolute inset-0 bg-gradient-to-r from-black/62 via-black/34 to-black/50" />
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(196,141,47,0.12),transparent_60%)]" />
+    <section className="relative isolate min-h-screen w-full overflow-hidden bg-black">
+      <div className="absolute inset-0">
+        {hasVideo ? (
+          <video
+            className="h-full w-full object-cover"
+            src={clientConfig.heroVideo}
+            autoPlay
+            loop
+            muted
+            playsInline
+          />
+        ) : (
+          <img
+            src={clientConfig.heroImage}
+            alt={clientConfig.brandName}
+            className="h-full w-full object-cover"
+            style={{ objectPosition: clientConfig.heroImagePosition || 'center center' }}
+            loading="eager"
+            fetchPriority="high"
+            sizes="100vw"
+            decoding="async"
+          />
+        )}
+      </div>
 
-      <div className="relative mx-auto flex min-h-[60vh] w-full max-w-[1200px] items-center justify-center px-4 py-16 text-center md:min-h-[72vh] md:px-6 md:py-24">
-        <div className="max-w-3xl space-y-4 text-white md:space-y-6">
-          <p className="mx-auto w-fit rounded-full border border-white/25 bg-white/10 px-4 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-white/90">
-            Premium Fashion Edit
+      <div className="relative mx-auto flex min-h-screen w-full max-w-[1200px] items-center px-4 pt-20 md:px-6 md:pt-24">
+        <div className="hero-fade-in max-w-[760px] space-y-5 text-white md:space-y-7">
+          <p className="w-fit border border-white/30 bg-black/20 px-4 py-1 text-[10px] font-semibold uppercase tracking-[0.24em] backdrop-blur-sm">
+            New Collection
           </p>
-          <h1 className="font-display text-4xl leading-tight md:text-6xl">
-            {clientConfig.shopName}
+          <h1 className="heading-hero text-[3rem] font-black leading-[0.86] md:text-[5.8rem] lg:text-[7.2rem]">
+            ELEVATE
+            <br />
+            YOUR FIT
           </h1>
-          <p className="text-base text-white/85 md:text-xl">{clientConfig.tagline}</p>
+          <p className="max-w-md text-[10px] font-semibold uppercase tracking-[0.28em] text-white/80 md:text-xs">
+            {clientConfig.brandName}
+          </p>
         </div>
       </div>
     </section>

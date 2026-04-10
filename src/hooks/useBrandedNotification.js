@@ -1,15 +1,16 @@
 import { useEffect, useState } from 'react'
+import clientConfig from '../config'
 
 export function useBrandedNotification() {
   const [errorMessage, setErrorMessage] = useState('')
 
   const showError = (message, type = 'error') => {
     if (type === 'success') {
-      setErrorMessage(`✅ Brothers Fashion Hub: ${message}`)
+      setErrorMessage(`✅ ${clientConfig.brandName}: ${message}`)
       return
     }
 
-    setErrorMessage(`⚠️ Brothers Fashion Hub: ${message}`)
+    setErrorMessage(`⚠️ ${clientConfig.brandName}: ${message}`)
   }
 
   useEffect(() => {

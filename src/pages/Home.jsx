@@ -1,8 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
-import Filters from '../components/Filters'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { motion as Motion } from 'framer-motion'
+import BrandStrip from '../components/BrandStrip'
 import BrandedNotification from '../components/BrandedNotification'
+import CategoryGridSection from '../components/CategoryGridSection'
+import FeatureSection from '../components/FeatureSection'
 import Footer from '../components/Footer'
 import Hero from '../components/Hero'
+import IntroSection from '../components/IntroSection'
 import Navbar from '../components/Navbar'
 import ProductCard from '../components/ProductCard'
 import QuickShopModal from '../components/QuickShopModal'
@@ -11,21 +15,20 @@ import { useBrandedNotification } from '../hooks/useBrandedNotification'
 import { fetchProducts } from '../services/productService'
 
 const FALLBACK_CATEGORY = 'Uncategorized'
-const CORE_SECTIONS = ['Shirts', 'T-Shirts', 'Jeans', 'Shoes']
-const FILTER_CATEGORY_OPTIONS = [
-  'All',
-  'Shirts',
-  'T-Shirts',
-  'Jeans',
-  'Shoes',
-  'Accessories',
-]
-const FILTER_PRICE_OPTIONS = [
-  { label: 'All', value: 'all' },
-  { label: 'Under Rs.500', value: 'under-500' },
-  { label: 'Rs.500 - Rs.1000', value: '500-1000' },
-  { label: 'Above Rs.1000', value: 'above-1000' },
-]
+const fadeUpTransition = {
+  duration: 0.65,
+  ease: [0.22, 1, 0.36, 1],
+}
+
+const fadeUpInitial = {
+  opacity: 0,
+  y: 28,
+}
+
+const fadeUpInView = {
+  opacity: 1,
+  y: 0,
+}
 
 function normalizeCategoryName(category) {
   return String(category || FALLBACK_CATEGORY).trim().toLowerCase()
@@ -57,15 +60,9 @@ function Home() {
   const [products, setProducts] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
-  const [isFiltersOpen, setIsFiltersOpen] = useState(false)
-
-  const [selectedCategory, setSelectedCategory] = useState('All')
-  const [selectedSizes, setSelectedSizes] = useState([])
-  const [selectedPriceRange, setSelectedPriceRange] = useState('all')
-
-  const [draftCategory, setDraftCategory] = useState('All')
-  const [draftSizes, setDraftSizes] = useState([])
-  const [draftPriceRange, setDraftPriceRange] = useState('all')
+  const [selectedCategory] = useState('All')
+  const [selectedSizes] = useState([])
+  const [selectedPriceRange] = useState('all')
   const [selectedProduct, setSelectedProduct] = useState(null)
   const [showModal, setShowModal] = useState(false)
   const { errorMessage, showError, clearError } = useBrandedNotification()
@@ -94,41 +91,18 @@ function Home() {
     })
   }, [products, searchQuery, selectedCategory, selectedSizes, selectedPriceRange])
 
-  const filterSizeOptions = useMemo(() => {
-    const sizes = new Set()
-    filteredProducts.forEach((product) => {
-      if (Array.isArray(product.sizes)) {
-        product.sizes.forEach((size) => {
-          const trimmedSize = String(size || '').trim()
-          if (trimmedSize) {
-            sizes.add(trimmedSize)
-          }
-        })
-      }
-    })
-    return Array.from(sizes).sort((a, b) => {
-      const aNum = Number(a)
-      const bNum = Number(b)
-      if (!Number.isNaN(aNum) && !Number.isNaN(bNum)) {
-        return aNum - bNum
-      }
-      return String(a).localeCompare(String(b))
-    })
-  }, [filteredProducts])
-
   const categorySections = useMemo(() => {
-    const configured = Array.isArray(clientConfig.productCategories)
-      ? clientConfig.productCategories
-      : []
+    const configured = Array.isArray(clientConfig.productCategories) ? clientConfig.productCategories : []
     const dataCategories = new Set(
       filteredProducts
-        .map((p) => normalizeCategoryName(p.category))
-        .filter((c) => Boolean(c) && c !== normalizeCategoryName(FALLBACK_CATEGORY)),
+        .map((product) => normalizeCategoryName(product.category))
+        .filter((category) => Boolean(category) && category !== normalizeCategoryName(FALLBACK_CATEGORY)),
     )
+
     const sectionTitles = [
-      ...configured.filter((c) => dataCategories.has(normalizeCategoryName(c))),
+      ...configured.filter((category) => dataCategories.has(normalizeCategoryName(category))),
       ...[...dataCategories].filter(
-        (c) => !configured.some((configC) => normalizeCategoryName(configC) === c),
+        (category) => !configured.some((configuredCategory) => normalizeCategoryName(configuredCategory) === category),
       ),
     ]
 
@@ -136,14 +110,48 @@ function Home() {
       .map((title) => ({
         title,
         products: filteredProducts.filter(
-          (product) =>
-            normalizeCategoryName(product.category) === normalizeCategoryName(title),
+          (product) => normalizeCategoryName(product.category) === normalizeCategoryName(title),
         ),
       }))
       .filter((section) => section.products.length > 0)
   }, [filteredProducts])
 
-  const loadProducts = async (forceRefresh = false) => {
+  const categoryGridItems = useMemo(() => {
+    const configuredCategories = Array.isArray(clientConfig.productCategories)
+      ? clientConfig.productCategories
+      : []
+
+    const normalizedConfigured = configuredCategories
+      .map((category) => String(category || '').trim())
+      .filter(Boolean)
+
+    const discoveredCategories = [...new Set(
+      products
+        .map((product) => String(product?.category || '').trim())
+        .filter(Boolean),
+    )]
+
+    const preferredCategoryOrder = [...new Set([...normalizedConfigured, ...discoveredCategories])]
+      .slice(0, 5)
+
+    return preferredCategoryOrder.map((categoryName) => {
+      const firstProductInCategory = products.find(
+        (product) => normalizeCategoryName(product.category) === normalizeCategoryName(categoryName),
+      )
+
+      const categoryImage = firstProductInCategory?.images?.[0]
+        || firstProductInCategory?.imageUrl
+        || firstProductInCategory?.image
+        || clientConfig.heroImage
+
+      return {
+        name: categoryName,
+        image: categoryImage,
+      }
+    })
+  }, [products])
+
+  const loadProducts = useCallback(async (forceRefresh = false) => {
     setIsLoading(true)
     clearError()
 
@@ -155,67 +163,17 @@ function Home() {
     } finally {
       setIsLoading(false)
     }
-  }
-
-  const handleProductCardError = (message) => {
-    showError(message)
-  }
+  }, [clearError, showError])
 
   useEffect(() => {
     loadProducts()
-  }, [])
+  }, [loadProducts])
 
-  const activeFiltersCount = useMemo(() => {
-    let count = 0
+  const handleProductCardError = useCallback((message) => {
+    showError(message)
+  }, [showError])
 
-    if (selectedCategory !== 'All') {
-      count += 1
-    }
-
-    if (selectedSizes.length > 0) {
-      count += 1
-    }
-
-    if (selectedPriceRange !== 'all') {
-      count += 1
-    }
-
-    return count
-  }, [selectedCategory, selectedSizes, selectedPriceRange])
-
-  const openFilters = () => {
-    setDraftCategory(selectedCategory)
-    setDraftSizes(selectedSizes)
-    setDraftPriceRange(selectedPriceRange)
-    setIsFiltersOpen(true)
-  }
-
-  const closeFilters = () => {
-    setIsFiltersOpen(false)
-  }
-
-  const toggleDraftSize = (size) => {
-    setDraftSizes((currentSizes) =>
-      currentSizes.includes(size)
-        ? currentSizes.filter((currentSize) => currentSize !== size)
-        : [...currentSizes, size],
-    )
-  }
-
-  const applyFilters = () => {
-    setSelectedCategory(draftCategory)
-    setSelectedSizes(draftSizes)
-    setSelectedPriceRange(draftPriceRange)
-    setIsFiltersOpen(false)
-  }
-
-  const clearDraftFilters = () => {
-    setDraftCategory('All')
-    setDraftSizes([])
-    setDraftPriceRange('all')
-  }
-
-  const handleQuickShopClick = (product, selectedSize = 'N/A') => {
+  const handleBuyNowClick = useCallback((product, selectedSize = 'N/A') => {
     if (!product) {
       return
     }
@@ -225,135 +183,206 @@ function Home() {
       selectedSize,
     })
     setShowModal(true)
-  }
+  }, [])
 
+  const hasActiveSearch = normalizeValue(searchQuery).length > 0
   const hasNoResults = !isLoading && products.length > 0 && categorySections.length === 0
 
   return (
-    <div className="min-h-screen">
+    <Motion.div
+      className="min-h-screen bg-black text-white"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.45, ease: 'easeOut' }}
+    >
       <BrandedNotification message={errorMessage} />
-      <Navbar />
-      <Hero />
+      <Navbar
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+      />
 
-      <main className="mx-auto w-full max-w-[1200px] px-4 pb-16 pt-10 md:px-6 md:pt-14">
-        <div className="mb-8 space-y-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-black/50">
-                Curated Collections
-              </p>
-              <h2 className="mt-2 font-display text-3xl text-obsidian md:text-4xl">
-                Shop By Category
-              </h2>
+      {hasActiveSearch && (
+        <Motion.section
+          className="w-full bg-white pb-10 pt-24 text-black md:pb-12 md:pt-28"
+          initial={{ opacity: 0, y: 18 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35, ease: 'easeOut' }}
+        >
+          <div className="container-section space-y-6">
+            <div className="space-y-1">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-black/45">Search</p>
+              <h2 className="heading-md text-black">Results for "{searchQuery.trim()}"</h2>
+              {!isLoading && (
+                <p className="text-xs font-medium uppercase tracking-[0.18em] text-black/55">
+                  {filteredProducts.length} {filteredProducts.length === 1 ? 'Style' : 'Styles'} Found
+                </p>
+              )}
             </div>
 
-            <button
-              type="button"
-              onClick={() => loadProducts(true)}
-              className="w-fit rounded-full border border-black/20 bg-white px-5 py-2.5 text-xs font-semibold uppercase tracking-[0.14em] text-black/70 transition hover:-translate-y-0.5 hover:bg-black/5"
-            >
-              Refresh Collection
-            </button>
-          </div>
+            {isLoading && (
+              <div className="grid grid-cols-2 gap-5 md:gap-6 lg:grid-cols-3 xl:grid-cols-4">
+                {[...Array(4)].map((_, index) => (
+                  <div key={index} className="h-72 animate-pulse border border-black/10 bg-black/5" />
+                ))}
+              </div>
+            )}
 
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="relative w-full md:max-w-md">
-              <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-black/45">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  className="h-4 w-4"
-                  aria-hidden="true"
-                >
-                  <circle cx="11" cy="11" r="8" />
-                  <path d="m21 21-4.35-4.35" />
-                </svg>
-              </span>
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="Search products..."
-                className="w-full rounded-xl border border-black/15 bg-white py-2.5 pl-10 pr-4 text-sm text-obsidian outline-none transition focus:border-obsidian"
+            {!isLoading && filteredProducts.length === 0 && (
+              <div className="border border-black/15 px-6 py-12 text-center text-black/65">
+                <p className="text-lg">No products found</p>
+                <p className="text-sm">Try another keyword</p>
+              </div>
+            )}
+
+            {!isLoading && filteredProducts.length > 0 && (
+              <div className="grid grid-cols-2 justify-items-start gap-5 md:gap-6 lg:grid-cols-3 xl:grid-cols-4">
+                {filteredProducts.map((product, index) => (
+                  <ProductCard
+                    key={`top-search-${product.id}`}
+                    product={product}
+                    showNewTag={index < 2}
+                    discountLabel={Number(product.price || 0) >= 2000 ? '10% OFF' : ''}
+                    onBuyNowClick={handleBuyNowClick}
+                    onError={handleProductCardError}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </Motion.section>
+      )}
+
+      {!hasActiveSearch && (
+        <>
+          <Hero />
+
+          <Motion.div
+            initial={fadeUpInitial}
+            whileInView={fadeUpInView}
+            viewport={{ once: true, amount: 0.25 }}
+            transition={fadeUpTransition}
+          >
+            <BrandStrip />
+          </Motion.div>
+
+          <Motion.div
+            initial={fadeUpInitial}
+            whileInView={fadeUpInView}
+            viewport={{ once: true, amount: 0.2 }}
+            transition={{ ...fadeUpTransition, delay: 0.14 }}
+          >
+            <IntroSection />
+          </Motion.div>
+
+          <Motion.div
+            initial={fadeUpInitial}
+            whileInView={fadeUpInView}
+            viewport={{ once: true, amount: 0.2 }}
+            transition={{ ...fadeUpTransition, delay: 0.16 }}
+          >
+            {categorySections.length > 0 && categorySections[0]?.products.length > 0 && (
+              <FeatureSection
+                product={categorySections[0].products[0]}
+                index={0}
               />
-            </div>
+            )}
+          </Motion.div>
 
-            <Filters
-              isOpen={isFiltersOpen}
-              onOpen={openFilters}
-              onClose={closeFilters}
-              categories={FILTER_CATEGORY_OPTIONS}
-              sizeOptions={filterSizeOptions}
-              priceOptions={FILTER_PRICE_OPTIONS}
-              selectedCategory={draftCategory}
-              selectedSizes={draftSizes}
-              selectedPriceRange={draftPriceRange}
-              onCategoryChange={setDraftCategory}
-              onToggleSize={toggleDraftSize}
-              onPriceRangeChange={setDraftPriceRange}
-              onApply={applyFilters}
-              onClear={clearDraftFilters}
-              activeFiltersCount={activeFiltersCount}
-            />
-          </div>
-        </div>
+          <Motion.div
+            initial={fadeUpInitial}
+            whileInView={fadeUpInView}
+            viewport={{ once: true, amount: 0.2 }}
+            transition={{ ...fadeUpTransition, delay: 0.18 }}
+          >
+            <CategoryGridSection items={categoryGridItems} />
+          </Motion.div>
 
-        {isLoading && (
-          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-            {[...Array(8)].map((_, index) => (
-              <div
-                key={index}
-                className="luxury-panel h-72 animate-pulse rounded-2xl bg-white/70"
-              />
-            ))}
-          </div>
-        )}
+          <Motion.main
+            id="shop"
+            className="w-full bg-white py-16 text-black md:py-20"
+            initial={fadeUpInitial}
+            whileInView={fadeUpInView}
+            viewport={{ once: true, amount: 0.15 }}
+            transition={{ ...fadeUpTransition, delay: 0.05 }}
+          >
+            <div className="container-section space-y-12">
+              <Motion.div
+                className="space-y-2"
+                initial={fadeUpInitial}
+                whileInView={fadeUpInView}
+                viewport={{ once: true, amount: 0.5 }}
+                transition={{ ...fadeUpTransition, delay: 0.08 }}
+              >
+                <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-black/45">Shop</p>
+                <h2 className="heading-lg text-4xl text-black md:text-6xl">The Collection</h2>
+              </Motion.div>
 
-        {!isLoading && products.length === 0 && (
-          <div className="luxury-panel px-4 py-12 text-center text-black/65">
-            No products available yet. Add items from the admin dashboard.
-          </div>
-        )}
-
-        {hasNoResults && (
-          <div className="luxury-panel px-4 py-12 text-center text-black/65">
-            No products found
-          </div>
-        )}
-
-        {!isLoading && categorySections.length > 0 && (
-          <div className="space-y-12">
-            {categorySections.map((section) => (
-              <section key={section.title} className="space-y-4">
-                <div className="flex items-end justify-between gap-3">
-                  <h3 className="font-display text-2xl text-obsidian md:text-3xl">
-                    {section.title}
-                  </h3>
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-black/50">
-                    {section.products.length} Styles
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-                  {section.products.map((product, index) => (
-                    <ProductCard
-                      key={product.id}
-                      product={product}
-                      showNewTag={index < 2}
-                      discountLabel={Number(product.price || 0) >= 2000 ? '10% OFF' : ''}
-                      onQuickShopClick={handleQuickShopClick}
-                      onError={handleProductCardError}
-                    />
+              {isLoading && (
+                <div className="grid grid-cols-2 gap-5 md:gap-6 lg:grid-cols-3 xl:grid-cols-4">
+                  {[...Array(8)].map((_, index) => (
+                    <div key={index} className="h-72 animate-pulse border border-black/10 bg-black/5" />
                   ))}
                 </div>
-              </section>
-            ))}
-          </div>
-        )}
-      </main>
+              )}
+
+              {!isLoading && products.length === 0 && (
+                <div className="border border-black/15 px-6 py-16 text-center text-black/65">
+                  <p className="text-lg">No products available yet.</p>
+                  <p className="text-sm">Add items from the admin dashboard.</p>
+                </div>
+              )}
+
+              {hasNoResults && (
+                <div className="border border-black/15 px-6 py-16 text-center text-black/65">
+                  <p className="text-lg">No products found</p>
+                  <p className="text-sm">Try adjusting your filters</p>
+                </div>
+              )}
+
+              {!isLoading && categorySections.length > 0 && (
+                <div className="space-y-16">
+                  {categorySections.map((section) => (
+                    <Motion.section
+                      key={section.title}
+                      className="space-y-6"
+                      initial={fadeUpInitial}
+                      whileInView={fadeUpInView}
+                      viewport={{ once: true, amount: 0.2 }}
+                      transition={fadeUpTransition}
+                    >
+                      <Motion.div
+                        className="flex items-end justify-between gap-3"
+                        initial={fadeUpInitial}
+                        whileInView={fadeUpInView}
+                        viewport={{ once: true, amount: 0.7 }}
+                        transition={{ ...fadeUpTransition, delay: 0.05 }}
+                      >
+                        <h3 className="heading-md text-black">{section.title}</h3>
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-black/45">
+                          {section.products.length} Styles
+                        </p>
+                      </Motion.div>
+
+                      <div className="grid grid-cols-2 justify-items-start gap-5 md:gap-6 lg:grid-cols-3 xl:grid-cols-4">
+                        {section.products.map((product, index) => (
+                          <ProductCard
+                            key={product.id}
+                            product={product}
+                            showNewTag={index < 2}
+                            discountLabel={Number(product.price || 0) >= 2000 ? '10% OFF' : ''}
+                            onBuyNowClick={handleBuyNowClick}
+                            onError={handleProductCardError}
+                          />
+                        ))}
+                      </div>
+                    </Motion.section>
+                  ))}
+                </div>
+              )}
+            </div>
+          </Motion.main>
+        </>
+      )}
 
       <QuickShopModal
         product={selectedProduct}
@@ -363,7 +392,7 @@ function Home() {
       />
 
       <Footer />
-    </div>
+    </Motion.div>
   )
 }
 

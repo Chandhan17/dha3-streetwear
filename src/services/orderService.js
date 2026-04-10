@@ -181,7 +181,6 @@ export const updatePaymentStatus = async (orderId, paymentStatus) => {
  */
 export const getOrderById = async (orderId) => {
   try {
-    const orderDoc = doc(db, ORDERS_COLLECTION, orderId)
     const snapshot = await getDocs(query(collection(db, ORDERS_COLLECTION), where('__name__', '==', orderId)))
 
     if (snapshot.empty) {

@@ -1,26 +1,60 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Allow anyone to read products (public collection)
-    match /products/{product=**} {
-      allow read: if true;
-      // Allow authenticated users (admin) to write products
-      allow write: if request.auth != null;
+    function isSignedIn() {
+      return request.auth != null;
     }
 
-    // Orders collection - secure access
-    match /orders/{document=**} {
-      // Allow anyone to create an order (authenticated or not for WhatsApp orders)
-      allow create: if true;
-      
-      // Allow anyone to read orders (for admin dashboard)
+    function currentUserPath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
+    }
+
+    function currentUserExists() {
+      return isSignedIn() && exists(currentUserPath());
+    }
+
+    function currentUserRole() {
+      return currentUserExists() ? get(currentUserPath()).data.role : null;
+    }
+
+    function isUser() {
+      return currentUserRole() == 'user';
+    }
+
+    function isAdmin() {
+      return currentUserRole() == 'admin';
+    }
+
+    // Products can remain public for storefront browsing.
+    match /products/{product=**} {
       allow read: if true;
-      
-      // Allow updates to orders
-      allow update: if true;
-      
-      // Allow deletion only if authenticated
-      allow delete: if request.auth != null;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Orders: users can create, admins have full control.
+    match /orders/{document=**} {
+      allow create: if isUser() || isAdmin();
+      allow read, update, delete: if isAdmin();
+    }
+
+    // Users can create/read/update their own profile document.
+    match /users/{userId} {
+      allow create: if isSignedIn()
+                    && request.auth.uid == userId
+                    && request.resource.data.uid == request.auth.uid
+                    && request.resource.data.role == 'user';
+
+      allow read: if isSignedIn() && request.auth.uid == userId
+                  || isAdmin();
+
+      allow update: if isAdmin()
+                    || (isSignedIn()
+                        && request.auth.uid == userId
+                        && resource.data.role == 'user'
+                        && request.resource.data.role == 'user'
+                        && request.resource.data.uid == request.auth.uid);
+
+      allow delete: if isAdmin();
     }
   }
 }

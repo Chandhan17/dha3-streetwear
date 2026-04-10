@@ -1,0 +1,16 @@
+export const clientConfig = {
+  brandName: 'DHA THREE Streetwear',
+  tagline: 'Premium Streetwear Collections',
+  phone: '7674042835',
+  whatsapp: '919133437430',
+  address: 'Vihanga 2, Beside Sai Baba Temple, YMR Colony, Proddatur',
+  instagram: 'https://instagram.com/dha3.streetwear',
+  logo: '/dha-logo.png',
+  heroImage: 'public/mens-hero.png',
+  heroImagePosition: 'center center',
+  productCategories: ['Shirts', 'T-Shirts', 'Jeans', 'Shoes', 'Accessories'],
+  shopName: 'DHA THREE Streetwear',
+  whatsappNumber: '917674042835',
+  logoPath: '/dha-logo.png',
+  instagramLink: 'https://instagram.com/dha3.streetwear',
+}

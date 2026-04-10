@@ -108,7 +108,7 @@ function Orders() {
 
   useEffect(() => {
     setSelectedOrderIds((prevIds) => prevIds.filter((id) => filteredOrderIds.includes(id)))
-  }, [orders, searchTerm, filterPaymentStatus, filterOrderStatus])
+  }, [filteredOrderIds])
 
   const handleSelectOrder = (orderId) => {
     setSelectedOrderIds((prevIds) =>
