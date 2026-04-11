@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: brothersfashion-backend
+    name: dha3-streetwear-backend
     runtime: node
     plan: free
     rootDir: .
