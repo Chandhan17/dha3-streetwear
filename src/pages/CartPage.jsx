@@ -118,27 +118,28 @@ function CartPage() {
     const orderSummary = buildOrderLines(items).join('\n')
 
     await createOrder({
-      customerName: customerDetails.name.trim(),
-      customerPhone: customerDetails.phone.trim(),
-      customerAddress: fullAddress,
-      customerDoorNo: customerDetails.doorNo.trim(),
-      customerStreet: customerDetails.street.trim(),
-      customerCity: customerDetails.city.trim(),
-      customerPincode: customerDetails.pincode.trim(),
-      customerState: customerDetails.state.trim(),
-      productName: `${clientConfig.brandName} Cart Order`,
-      productPrice: cartTotal,
-      productId: items.map((item) => item.productId).join(', '),
-      selectedSize: items.map((item) => item.selectedSize).join(', '),
-      productImage: items[0]?.imageUrl || '',
+      userId: auth.currentUser?.uid || 'guest',
+      items: items.map((item) => ({
+        productId: item.productId,
+        quantity: item.quantity,
+        selectedSize: item.selectedSize,
+      })),
+      customerDetails: {
+        name: customerDetails.name.trim(),
+        phone: customerDetails.phone.trim(),
+        doorNo: customerDetails.doorNo.trim(),
+        street: customerDetails.street.trim(),
+        city: customerDetails.city.trim(),
+        pincode: customerDetails.pincode.trim(),
+        state: customerDetails.state.trim(),
+        notes: customerDetails.notes.trim(),
+        address: fullAddress,
+      },
       paymentMethod,
       paymentStatus,
-      status: paymentStatus === 'paid' ? 'processing' : 'pending',
-      notes: customerDetails.notes.trim(),
-      cartItems: items,
-      cartSummary: orderSummary,
-      razorpay_payment_id: paymentResponse.paymentId || '',
-      razorpay_order_id: paymentResponse.orderId || '',
+      orderStatus: paymentStatus === 'paid' ? 'processing' : 'pending',
+      paymentId: paymentResponse.paymentId || '',
+      paymentOrderId: paymentResponse.orderId || '',
     })
 
     persistCustomerDetails(customerDetails)

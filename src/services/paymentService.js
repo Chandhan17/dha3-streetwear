@@ -15,14 +15,26 @@ function getApiUrl() {
   return API_URL
 }
 
+function toNetworkError(error, endpoint) {
+  if (error instanceof TypeError) {
+    return new Error(
+      `Network request failed for ${endpoint}. Check API URL, TLS certificate, CORS, and backend availability.`,
+    )
+  }
+
+  return error
+}
+
 /**
  * Create a Razorpay order from the backend using server-side product pricing.
  * @param {Object} payload - Order creation payload
  * @returns {Promise<{orderId: string, amount: number, currency: string}>}
  */
 export const createOrder = async (payload) => {
+  const endpoint = `${getApiUrl()}/api/create-order`
+
   try {
-    const response = await fetch(`${getApiUrl()}/api/create-order`, {
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -42,8 +54,9 @@ export const createOrder = async (payload) => {
 
     return data
   } catch (error) {
-    console.error('Error creating order:', error)
-    throw error
+    const mappedError = toNetworkError(error, endpoint)
+    console.error('Error creating order:', mappedError)
+    throw mappedError
   }
 }
 
@@ -55,8 +68,10 @@ export const createOrder = async (payload) => {
  * @returns {Promise<{success: boolean, message: string}>}
  */
 export const verifyPayment = async (orderId, paymentId, signature) => {
+  const endpoint = `${getApiUrl()}/api/verify-payment`
+
   try {
-    const response = await fetch(`${getApiUrl()}/api/verify-payment`, {
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -80,8 +95,9 @@ export const verifyPayment = async (orderId, paymentId, signature) => {
 
     return data
   } catch (error) {
-    console.error('Error verifying payment:', error)
-    throw error
+    const mappedError = toNetworkError(error, endpoint)
+    console.error('Error verifying payment:', mappedError)
+    throw mappedError
   }
 }
 
@@ -91,8 +107,10 @@ export const verifyPayment = async (orderId, paymentId, signature) => {
  * @returns {Promise<{success: boolean, orderDocumentId?: string}>}
  */
 export const storeVerifiedOrder = async (payload) => {
+  const endpoint = `${getApiUrl()}/api/store-order`
+
   try {
-    const response = await fetch(`${getApiUrl()}/api/store-order`, {
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -112,8 +130,9 @@ export const storeVerifiedOrder = async (payload) => {
 
     return data
   } catch (error) {
-    console.error('Error storing verified order:', error)
-    throw error
+    const mappedError = toNetworkError(error, endpoint)
+    console.error('Error storing verified order:', mappedError)
+    throw mappedError
   }
 }
 
@@ -262,8 +281,10 @@ export const initiatePayment = async ({
  * @returns {Promise<{success: boolean}>}
  */
 export const storeOrderData = async (orderData) => {
+  const endpoint = `${getApiUrl()}/api/store-order`
+
   try {
-    const response = await fetch(`${getApiUrl()}/api/store-order`, {
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -278,8 +299,9 @@ export const storeOrderData = async (orderData) => {
     const data = await response.json()
     return data
   } catch (error) {
-    console.error('Error storing order:', error)
-    throw error
+    const mappedError = toNetworkError(error, endpoint)
+    console.error('Error storing order:', mappedError)
+    throw mappedError
   }
 }
 

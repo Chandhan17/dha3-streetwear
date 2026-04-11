@@ -12,7 +12,7 @@ services:
       - key: NODE_VERSION
         value: 20
       - key: CORS_ORIGINS
-        value: http://localhost:5173,https://yourdomain.com
+        value: https://yourdomain.com
       - key: FIREBASE_PROJECT_ID
         sync: false
       - key: FIREBASE_CLIENT_EMAIL

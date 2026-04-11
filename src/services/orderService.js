@@ -1,24 +1,75 @@
-/**
- * Order Service for Firestore Integration
- * Handles order creation, retrieval, and status updates
- */
+import { auth } from '../firebase'
 
-import {
-  addDoc,
-  collection,
-  deleteDoc,
-  doc,
-  getDocs,
-  onSnapshot,
-  orderBy,
-  query,
-  serverTimestamp,
-  updateDoc,
-  where,
-} from 'firebase/firestore'
-import { db } from '../firebase'
+const API_URL = String(import.meta.env.VITE_API_URL || '').trim()
 
-const ORDERS_COLLECTION = 'orders'
+function getApiUrl() {
+  if (!API_URL) {
+    throw new Error('Missing VITE_API_URL environment variable')
+  }
+
+  return API_URL
+}
+
+async function getAuthHeaders(requireAuth = false) {
+  const headers = {
+    'Content-Type': 'application/json',
+  }
+
+  if (!requireAuth) {
+    return headers
+  }
+
+  const currentUser = auth.currentUser
+
+  if (!currentUser) {
+    throw new Error('Authentication required')
+  }
+
+  const token = await currentUser.getIdToken()
+  headers.Authorization = `Bearer ${token}`
+  return headers
+}
+
+function normalizeDate(value) {
+  if (!value) {
+    return new Date()
+  }
+
+  if (value instanceof Date) {
+    return value
+  }
+
+  if (typeof value?.toDate === 'function') {
+    return value.toDate()
+  }
+
+  const asDate = new Date(value)
+  return Number.isNaN(asDate.getTime()) ? new Date() : asDate
+}
+
+function normalizeOrder(order) {
+  const products = Array.isArray(order?.products) ? order.products : []
+  const firstProduct = products[0] || {}
+  const customerDetails = order?.customerDetails && typeof order.customerDetails === 'object'
+    ? order.customerDetails
+    : {}
+
+  return {
+    ...order,
+    products,
+    status: String(order?.orderStatus || order?.status || 'pending').trim() || 'pending',
+    orderStatus: String(order?.orderStatus || order?.status || 'pending').trim() || 'pending',
+    customerName: String(order?.customerName || customerDetails?.name || '').trim(),
+    customerPhone: String(order?.customerPhone || customerDetails?.phone || '').trim(),
+    customerAddress: String(order?.customerAddress || customerDetails?.address || '').trim(),
+    productName: String(order?.productName || firstProduct?.name || '').trim(),
+    productPrice: Number(order?.productPrice || order?.totalAmount || 0),
+    selectedSize: String(order?.selectedSize || firstProduct?.selectedSize || 'N/A').trim() || 'N/A',
+    paymentStatus: String(order?.paymentStatus || '').trim(),
+    createdAt: normalizeDate(order?.createdAt),
+    updatedAt: normalizeDate(order?.updatedAt),
+  }
+}
 
 /**
  * Create a new order
@@ -39,21 +90,19 @@ const ORDERS_COLLECTION = 'orders'
  */
 export const createOrder = async (orderData) => {
   try {
-    const ordersCollection = collection(db, ORDERS_COLLECTION)
+    const response = await fetch(`${getApiUrl()}/api/orders`, {
+      method: 'POST',
+      headers: await getAuthHeaders(false),
+      body: JSON.stringify(orderData),
+    })
 
-    const docData = {
-      ...orderData,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-      status: 'pending', // Order status: pending, processing, completed, cancelled
+    const data = await response.json().catch(() => ({}))
+
+    if (!response.ok || !data.success) {
+      throw new Error(data.error || 'Failed to create order')
     }
 
-    const docRef = await addDoc(ordersCollection, docData)
-
-    return {
-      id: docRef.id,
-      ...docData,
-    }
+    return data
   } catch (error) {
     console.error('Error creating order:', error)
     throw error
@@ -66,16 +115,18 @@ export const createOrder = async (orderData) => {
  */
 export const getOrders = async () => {
   try {
-    const ordersCollection = collection(db, ORDERS_COLLECTION)
-    const q = query(ordersCollection, orderBy('createdAt', 'desc'))
-    const snapshot = await getDocs(q)
+    const response = await fetch(`${getApiUrl()}/api/admin/orders`, {
+      method: 'GET',
+      headers: await getAuthHeaders(true),
+    })
 
-    return snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-      createdAt: doc.data().createdAt?.toDate?.() || new Date(),
-      updatedAt: doc.data().updatedAt?.toDate?.() || new Date(),
-    }))
+    const data = await response.json().catch(() => ({}))
+
+    if (!response.ok || !data.success) {
+      throw new Error(data.message || 'Failed to fetch orders')
+    }
+
+    return (Array.isArray(data.orders) ? data.orders : []).map((order) => normalizeOrder(order))
   } catch (error) {
     console.error('Error fetching orders:', error)
     throw error
@@ -88,25 +139,8 @@ export const getOrders = async () => {
  * @returns {Promise<Array>}
  */
 export const getOrdersByPaymentStatus = async (paymentStatus) => {
-  try {
-    const ordersCollection = collection(db, ORDERS_COLLECTION)
-    const q = query(
-      ordersCollection,
-      where('paymentStatus', '==', paymentStatus),
-      orderBy('createdAt', 'desc'),
-    )
-    const snapshot = await getDocs(q)
-
-    return snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-      createdAt: doc.data().createdAt?.toDate?.() || new Date(),
-      updatedAt: doc.data().updatedAt?.toDate?.() || new Date(),
-    }))
-  } catch (error) {
-    console.error('Error fetching orders by payment status:', error)
-    throw error
-  }
+  const orders = await getOrders()
+  return orders.filter((order) => String(order.paymentStatus || '') === String(paymentStatus || ''))
 }
 
 /**
@@ -115,25 +149,8 @@ export const getOrdersByPaymentStatus = async (paymentStatus) => {
  * @returns {Promise<Array>}
  */
 export const getOrdersByOrderStatus = async (orderStatus) => {
-  try {
-    const ordersCollection = collection(db, ORDERS_COLLECTION)
-    const q = query(
-      ordersCollection,
-      where('status', '==', orderStatus),
-      orderBy('createdAt', 'desc'),
-    )
-    const snapshot = await getDocs(q)
-
-    return snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-      createdAt: doc.data().createdAt?.toDate?.() || new Date(),
-      updatedAt: doc.data().updatedAt?.toDate?.() || new Date(),
-    }))
-  } catch (error) {
-    console.error('Error fetching orders by order status:', error)
-    throw error
-  }
+  const orders = await getOrders()
+  return orders.filter((order) => String(order.status || '') === String(orderStatus || ''))
 }
 
 /**
@@ -144,11 +161,19 @@ export const getOrdersByOrderStatus = async (orderStatus) => {
  */
 export const updateOrderStatus = async (orderId, status) => {
   try {
-    const orderDoc = doc(db, ORDERS_COLLECTION, orderId)
-    await updateDoc(orderDoc, {
-      status,
-      updatedAt: serverTimestamp(),
+    const response = await fetch(`${getApiUrl()}/api/admin/order/${encodeURIComponent(orderId)}`, {
+      method: 'PUT',
+      headers: await getAuthHeaders(true),
+      body: JSON.stringify({
+        orderStatus: status,
+      }),
     })
+
+    const data = await response.json().catch(() => ({}))
+
+    if (!response.ok || !data.success) {
+      throw new Error(data.message || 'Failed to update order status')
+    }
   } catch (error) {
     console.error('Error updating order status:', error)
     throw error
@@ -162,15 +187,15 @@ export const updateOrderStatus = async (orderId, status) => {
  * @returns {Promise<void>}
  */
 export const updatePaymentStatus = async (orderId, paymentStatus) => {
-  try {
-    const orderDoc = doc(db, ORDERS_COLLECTION, orderId)
-    await updateDoc(orderDoc, {
-      paymentStatus,
-      updatedAt: serverTimestamp(),
-    })
-  } catch (error) {
-    console.error('Error updating payment status:', error)
-    throw error
+  const orders = await getOrders()
+  const targetOrder = orders.find((order) => order.id === orderId)
+
+  if (!targetOrder) {
+    throw new Error('Order not found')
+  }
+
+  if (String(targetOrder.paymentStatus || '') !== String(paymentStatus || '')) {
+    throw new Error('Payment status can only be changed by payment verification endpoints')
   }
 }
 
@@ -180,24 +205,14 @@ export const updatePaymentStatus = async (orderId, paymentStatus) => {
  * @returns {Promise<Object>}
  */
 export const getOrderById = async (orderId) => {
-  try {
-    const snapshot = await getDocs(query(collection(db, ORDERS_COLLECTION), where('__name__', '==', orderId)))
+  const orders = await getOrders()
+  const target = orders.find((order) => order.id === orderId)
 
-    if (snapshot.empty) {
-      throw new Error('Order not found')
-    }
-
-    const docSnapshot = snapshot.docs[0]
-    return {
-      id: docSnapshot.id,
-      ...docSnapshot.data(),
-      createdAt: docSnapshot.data().createdAt?.toDate?.() || new Date(),
-      updatedAt: docSnapshot.data().updatedAt?.toDate?.() || new Date(),
-    }
-  } catch (error) {
-    console.error('Error fetching order:', error)
-    throw error
+  if (!target) {
+    throw new Error('Order not found')
   }
+
+  return target
 }
 
 /**
@@ -207,8 +222,16 @@ export const getOrderById = async (orderId) => {
  */
 export const deleteOrder = async (orderId) => {
   try {
-    const orderDoc = doc(db, ORDERS_COLLECTION, orderId)
-    await deleteDoc(orderDoc)
+    const response = await fetch(`${getApiUrl()}/api/admin/order/${encodeURIComponent(orderId)}`, {
+      method: 'DELETE',
+      headers: await getAuthHeaders(true),
+    })
+
+    const data = await response.json().catch(() => ({}))
+
+    if (!response.ok || !data.success) {
+      throw new Error(data.message || 'Failed to delete order')
+    }
   } catch (error) {
     console.error('Error deleting order:', error)
     throw error
@@ -221,24 +244,27 @@ export const deleteOrder = async (orderId) => {
  * @returns {Function} Unsubscribe function
  */
 export const subscribeToOrders = (callback) => {
-  try {
-    const ordersCollection = collection(db, ORDERS_COLLECTION)
-    const q = query(ordersCollection, orderBy('createdAt', 'desc'))
+  let cancelled = false
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const orders = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-        createdAt: doc.data().createdAt?.toDate?.() || new Date(),
-        updatedAt: doc.data().updatedAt?.toDate?.() || new Date(),
-      }))
-      callback(orders)
-    })
+  const executeFetch = async () => {
+    try {
+      const orders = await getOrders()
+      if (!cancelled) {
+        callback(orders)
+      }
+    } catch (error) {
+      if (!cancelled) {
+        console.error('Error subscribing to orders:', error)
+      }
+    }
+  }
 
-    return unsubscribe
-  } catch (error) {
-    console.error('Error subscribing to orders:', error)
-    throw error
+  void executeFetch()
+  const timer = window.setInterval(executeFetch, 15000)
+
+  return () => {
+    cancelled = true
+    window.clearInterval(timer)
   }
 }
 
@@ -250,46 +276,24 @@ export const subscribeToOrders = (callback) => {
  * @returns {Function} Unsubscribe function
  */
 export const subscribeToOrdersByFilter = (filters, callback, errorCallback) => {
-  try {
-    const ordersCollection = collection(db, ORDERS_COLLECTION)
+  const unsubscribe = subscribeToOrders((orders) => {
+    const filteredOrders = orders.filter((order) => {
+      const paymentMatch = !filters?.paymentStatus || String(order.paymentStatus || '') === String(filters.paymentStatus)
+      const statusMatch = !filters?.orderStatus || String(order.status || '') === String(filters.orderStatus)
+      return paymentMatch && statusMatch
+    })
 
-    // Use a single indexed stream and filter client-side to avoid composite index requirements.
-    const q = query(ordersCollection, orderBy('createdAt', 'desc'))
+    callback(filteredOrders)
+  })
 
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const allOrders = snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-          createdAt: doc.data().createdAt?.toDate?.() || new Date(),
-          updatedAt: doc.data().updatedAt?.toDate?.() || new Date(),
-        }))
-
-        const filteredOrders = allOrders.filter((order) => {
-          const paymentMatch =
-            !filters?.paymentStatus || order.paymentStatus === filters.paymentStatus
-          const statusMatch = !filters?.orderStatus || order.status === filters.orderStatus
-          return paymentMatch && statusMatch
-        })
-
-        callback(filteredOrders)
-      },
-      (error) => {
-        console.error('Error subscribing to filtered orders:', error)
-        if (errorCallback) {
-          errorCallback(error)
-        }
-      },
-    )
-
-    return unsubscribe
-  } catch (error) {
-    console.error('Error setting up filtered orders subscription:', error)
-    if (errorCallback) {
-      errorCallback(error)
+  return () => {
+    try {
+      unsubscribe()
+    } catch (error) {
+      if (errorCallback) {
+        errorCallback(error)
+      }
     }
-    throw error
   }
 }
 

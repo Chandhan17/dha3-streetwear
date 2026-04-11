@@ -32,11 +32,14 @@ function getAllowedOrigins() {
     .map((origin) => origin.trim())
     .filter(Boolean)
 
-  if (configuredOrigins.length > 0) {
-    return configuredOrigins
+  const isTestingMode = process.env.NODE_ENV === 'test'
+    || String(process.env.SKIP_FIREBASE_INIT || '').toLowerCase() === 'true'
+
+  if (configuredOrigins.length === 0 && !isTestingMode) {
+    throw new Error('Missing CORS_ORIGINS. Configure at least one trusted frontend origin.')
   }
 
-  return ['http://localhost:5173', 'https://yourdomain.com']
+  return configuredOrigins
 }
 
 function initializeFirebaseAdmin() {
@@ -77,6 +80,24 @@ const razorpay = new Razorpay({
 })
 
 const allowedOrigins = getAllowedOrigins()
+
+const runtimeDependencies = {
+  firestore,
+  adminAuth,
+  razorpay,
+}
+
+function getRuntimeDependencies() {
+  return runtimeDependencies
+}
+
+function setRuntimeDependenciesForTests(overrides = {}) {
+  if (process.env.NODE_ENV !== 'test') {
+    throw new Error('Runtime dependency overrides are only allowed in test environment')
+  }
+
+  Object.assign(runtimeDependencies, overrides)
+}
 
 app.set('trust proxy', 1)
 app.use(helmet())
@@ -148,13 +169,15 @@ function normalizeOrderItems(payload) {
 }
 
 async function buildServerPricedOrder(orderItems) {
-  if (!firestore) {
+  const { firestore: db } = getRuntimeDependencies()
+
+  if (!db) {
     throw new Error('Database not configured')
   }
 
   const docs = await Promise.all(
     orderItems.map((item) =>
-      firestore.collection(PRODUCT_COLLECTION).doc(item.productId).get(),
+      db.collection(PRODUCT_COLLECTION).doc(item.productId).get(),
     ),
   )
 
@@ -211,7 +234,9 @@ function isSignatureValid(orderId, paymentId, incomingSignature) {
 
 async function attachUserFromToken(req, res, next) {
   try {
-    if (!adminAuth || !firestore) {
+    const { adminAuth: authService, firestore: db } = getRuntimeDependencies()
+
+    if (!authService || !db) {
       return res.status(503).json({ success: false, message: 'Server not configured' })
     }
 
@@ -227,8 +252,8 @@ async function attachUserFromToken(req, res, next) {
       return res.status(401).json({ success: false, message: 'Unauthorized' })
     }
 
-    const decodedToken = await adminAuth.verifyIdToken(idToken)
-    const userDoc = await firestore.collection('users').doc(decodedToken.uid).get()
+    const decodedToken = await authService.verifyIdToken(idToken)
+    const userDoc = await db.collection('users').doc(decodedToken.uid).get()
     const userRole = String(userDoc.data()?.role || '').trim().toLowerCase()
 
     req.user = {
@@ -258,7 +283,9 @@ app.get('/health', (req, res) => {
 
 app.post('/api/create-order', paymentRateLimit, async (req, res) => {
   try {
-    if (!firestore) {
+    const { firestore: db, razorpay: razorpayClient } = getRuntimeDependencies()
+
+    if (!db || !razorpayClient) {
       return res.status(503).json({ success: false, error: 'Server not configured' })
     }
 
@@ -277,7 +304,7 @@ app.post('/api/create-order', paymentRateLimit, async (req, res) => {
     const { products, totalAmount } = await buildServerPricedOrder(orderItems)
     const amountInPaise = Math.round(totalAmount * 100)
 
-    const order = await razorpay.orders.create({
+    const order = await razorpayClient.orders.create({
       amount: amountInPaise,
       currency,
       receipt: `receipt_${Date.now()}`,
@@ -286,7 +313,7 @@ app.post('/api/create-order', paymentRateLimit, async (req, res) => {
       },
     })
 
-    await firestore.collection(PAYMENT_INTENT_COLLECTION).doc(order.id).set({
+    await db.collection(PAYMENT_INTENT_COLLECTION).doc(order.id).set({
       userId,
       products,
       totalAmount,
@@ -313,7 +340,9 @@ app.post('/api/create-order', paymentRateLimit, async (req, res) => {
 
 app.post('/api/verify-payment', paymentRateLimit, async (req, res) => {
   try {
-    if (!firestore) {
+    const { firestore: db } = getRuntimeDependencies()
+
+    if (!db) {
       return res.status(503).json({ success: false, error: 'Server not configured' })
     }
 
@@ -339,7 +368,7 @@ app.post('/api/verify-payment', paymentRateLimit, async (req, res) => {
       })
     }
 
-    await firestore.collection(PAYMENT_INTENT_COLLECTION).doc(razorpay_order_id).set(
+    await db.collection(PAYMENT_INTENT_COLLECTION).doc(razorpay_order_id).set(
       {
         verified: true,
         paymentId: razorpay_payment_id,
@@ -362,7 +391,9 @@ app.post('/api/verify-payment', paymentRateLimit, async (req, res) => {
 
 app.post('/api/store-order', paymentRateLimit, async (req, res) => {
   try {
-    if (!firestore) {
+    const { firestore: db } = getRuntimeDependencies()
+
+    if (!db) {
       return res.status(503).json({ success: false, error: 'Server not configured' })
     }
 
@@ -373,7 +404,7 @@ app.post('/api/store-order', paymentRateLimit, async (req, res) => {
       return res.status(400).json({ success: false, error: 'orderId is required' })
     }
 
-    const intentRef = firestore.collection(PAYMENT_INTENT_COLLECTION).doc(orderId)
+    const intentRef = db.collection(PAYMENT_INTENT_COLLECTION).doc(orderId)
     const intentSnapshot = await intentRef.get()
 
     if (!intentSnapshot.exists) {
@@ -414,7 +445,7 @@ app.post('/api/store-order', paymentRateLimit, async (req, res) => {
       updatedAt: FieldValue.serverTimestamp(),
     }
 
-    const orderRef = await firestore.collection(ORDER_COLLECTION).add(orderPayload)
+    const orderRef = await db.collection(ORDER_COLLECTION).add(orderPayload)
 
     await intentRef.set(
       {
@@ -438,12 +469,71 @@ app.post('/api/store-order', paymentRateLimit, async (req, res) => {
   }
 })
 
-app.get('/api/admin/orders', attachUserFromToken, isAdmin, async (req, res) => {
+app.post('/api/orders', paymentRateLimit, async (req, res) => {
   try {
-    const snapshot = await firestore
+    const { firestore: db } = getRuntimeDependencies()
+
+    if (!db) {
+      return res.status(503).json({ success: false, error: 'Server not configured' })
+    }
+
+    const userId = String(req.body?.userId || 'guest').trim() || 'guest'
+    const customerDetails = req.body?.customerDetails && typeof req.body.customerDetails === 'object'
+      ? req.body.customerDetails
+      : {}
+    const paymentMethod = String(req.body?.paymentMethod || 'whatsapp').trim() || 'whatsapp'
+    const orderStatus = String(req.body?.orderStatus || 'pending').trim() || 'pending'
+    const orderItems = normalizeOrderItems(req.body)
+
+    if (paymentMethod !== 'whatsapp') {
+      return res.status(400).json({ success: false, error: 'Unsupported payment method for this endpoint' })
+    }
+
+    if (orderItems.length === 0) {
+      return res.status(400).json({ success: false, error: 'Product details are required' })
+    }
+
+    const { products, totalAmount } = await buildServerPricedOrder(orderItems)
+
+    const orderRef = await db.collection(ORDER_COLLECTION).add({
+      userId,
+      products,
+      totalAmount,
+      currency: 'INR',
+      paymentId: '',
+      paymentOrderId: '',
+      paymentStatus: 'pending',
+      paymentMethod,
+      orderStatus,
+      customerDetails,
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    })
+
+    return res.status(201).json({
+      success: true,
+      orderDocumentId: orderRef.id,
+      totalAmount,
+      products,
+    })
+  } catch (error) {
+    console.error('WhatsApp order creation error:', error)
+    return res.status(500).json({ success: false, error: 'Failed to create order' })
+  }
+})
+
+async function handleAdminGetOrders(req, res) {
+  try {
+    const { firestore: db } = getRuntimeDependencies()
+
+    if (!db) {
+      return res.status(503).json({ success: false, message: 'Server not configured' })
+    }
+
+    const snapshot = await db
       .collection(ORDER_COLLECTION)
       .orderBy('createdAt', 'desc')
-      .limit(100)
+      .limit(200)
       .get()
 
     const orders = snapshot.docs.map((docSnapshot) => ({
@@ -451,23 +541,29 @@ app.get('/api/admin/orders', attachUserFromToken, isAdmin, async (req, res) => {
       ...docSnapshot.data(),
     }))
 
-    res.json({ success: true, orders })
+    return res.json({ success: true, orders })
   } catch (error) {
     console.error('Admin orders fetch error:', error)
-    res.status(500).json({ success: false, message: 'Something went wrong' })
+    return res.status(500).json({ success: false, message: 'Something went wrong' })
   }
-})
+}
 
-app.patch('/api/admin/orders/:orderId/status', attachUserFromToken, isAdmin, async (req, res) => {
+async function handleAdminUpdateOrder(req, res) {
   try {
-    const orderId = String(req.params?.orderId || '').trim()
+    const { firestore: db } = getRuntimeDependencies()
+
+    if (!db) {
+      return res.status(503).json({ success: false, message: 'Server not configured' })
+    }
+
+    const orderId = String(req.params?.orderId || req.params?.id || '').trim()
     const orderStatus = String(req.body?.orderStatus || '').trim()
 
     if (!orderId || !orderStatus) {
       return res.status(400).json({ success: false, message: 'orderId and orderStatus are required' })
     }
 
-    await firestore.collection(ORDER_COLLECTION).doc(orderId).set(
+    await db.collection(ORDER_COLLECTION).doc(orderId).set(
       {
         orderStatus,
         updatedAt: FieldValue.serverTimestamp(),
@@ -475,15 +571,51 @@ app.patch('/api/admin/orders/:orderId/status', attachUserFromToken, isAdmin, asy
       { merge: true },
     )
 
-    res.json({ success: true, message: 'Order status updated' })
+    return res.json({ success: true, message: 'Order status updated' })
   } catch (error) {
     console.error('Admin order status update error:', error)
-    res.status(500).json({ success: false, message: 'Something went wrong' })
+    return res.status(500).json({ success: false, message: 'Something went wrong' })
   }
-})
+}
+
+async function handleAdminDeleteOrder(req, res) {
+  try {
+    const { firestore: db } = getRuntimeDependencies()
+
+    if (!db) {
+      return res.status(503).json({ success: false, message: 'Server not configured' })
+    }
+
+    const orderId = String(req.params?.orderId || req.params?.id || '').trim()
+
+    if (!orderId) {
+      return res.status(400).json({ success: false, message: 'orderId is required' })
+    }
+
+    await db.collection(ORDER_COLLECTION).doc(orderId).delete()
+    return res.json({ success: true, message: 'Order deleted' })
+  } catch (error) {
+    console.error('Admin order delete error:', error)
+    return res.status(500).json({ success: false, message: 'Something went wrong' })
+  }
+}
+
+app.get('/api/admin/orders', attachUserFromToken, isAdmin, handleAdminGetOrders)
+app.put('/api/admin/order/:id', attachUserFromToken, isAdmin, handleAdminUpdateOrder)
+app.delete('/api/admin/order/:id', attachUserFromToken, isAdmin, handleAdminDeleteOrder)
+
+app.get('/admin/orders', attachUserFromToken, isAdmin, handleAdminGetOrders)
+app.put('/admin/order/:id', attachUserFromToken, isAdmin, handleAdminUpdateOrder)
+app.delete('/admin/order/:id', attachUserFromToken, isAdmin, handleAdminDeleteOrder)
 
 app.post('/api/admin/products', attachUserFromToken, isAdmin, async (req, res) => {
   try {
+    const { firestore: db } = getRuntimeDependencies()
+
+    if (!db) {
+      return res.status(503).json({ success: false, message: 'Server not configured' })
+    }
+
     const product = req.body && typeof req.body === 'object' ? req.body : null
 
     if (!product || !String(product.name || '').trim()) {
@@ -497,7 +629,7 @@ app.post('/api/admin/products', attachUserFromToken, isAdmin, async (req, res) =
       updatedAt: FieldValue.serverTimestamp(),
     }
 
-    const docRef = await firestore.collection(PRODUCT_COLLECTION).add(payload)
+    const docRef = await db.collection(PRODUCT_COLLECTION).add(payload)
 
     res.status(201).json({ success: true, productId: docRef.id })
   } catch (error) {
@@ -508,6 +640,12 @@ app.post('/api/admin/products', attachUserFromToken, isAdmin, async (req, res) =
 
 app.put('/api/admin/products/:productId', attachUserFromToken, isAdmin, async (req, res) => {
   try {
+    const { firestore: db } = getRuntimeDependencies()
+
+    if (!db) {
+      return res.status(503).json({ success: false, message: 'Server not configured' })
+    }
+
     const productId = String(req.params?.productId || '').trim()
 
     if (!productId) {
@@ -523,7 +661,7 @@ app.put('/api/admin/products/:productId', attachUserFromToken, isAdmin, async (r
       payload.price = Number(payload.price || 0)
     }
 
-    await firestore.collection(PRODUCT_COLLECTION).doc(productId).set(payload, { merge: true })
+    await db.collection(PRODUCT_COLLECTION).doc(productId).set(payload, { merge: true })
 
     res.json({ success: true, message: 'Product updated' })
   } catch (error) {
@@ -534,13 +672,19 @@ app.put('/api/admin/products/:productId', attachUserFromToken, isAdmin, async (r
 
 app.delete('/api/admin/products/:productId', attachUserFromToken, isAdmin, async (req, res) => {
   try {
+    const { firestore: db } = getRuntimeDependencies()
+
+    if (!db) {
+      return res.status(503).json({ success: false, message: 'Server not configured' })
+    }
+
     const productId = String(req.params?.productId || '').trim()
 
     if (!productId) {
       return res.status(400).json({ success: false, message: 'productId is required' })
     }
 
-    await firestore.collection(PRODUCT_COLLECTION).doc(productId).delete()
+    await db.collection(PRODUCT_COLLECTION).doc(productId).delete()
     res.json({ success: true, message: 'Product deleted' })
   } catch (error) {
     console.error('Admin product delete error:', error)
@@ -554,7 +698,14 @@ app.use((err, req, res, next) => {
   void next
 })
 
-export { app, isAdmin, isSignatureValid, normalizeOrderItems }
+export {
+  app,
+  attachUserFromToken,
+  isAdmin,
+  isSignatureValid,
+  normalizeOrderItems,
+  setRuntimeDependenciesForTests,
+}
 
 const currentModulePath = fileURLToPath(import.meta.url)
 const executedFilePath = process.argv[1] ? path.resolve(process.argv[1]) : ''

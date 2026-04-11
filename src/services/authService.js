@@ -18,7 +18,19 @@ export async function getUserRole(userId) {
     return null
   }
 
-  const userSnapshot = await getDoc(doc(db, 'users', normalizedUserId))
+  let userSnapshot
+
+  try {
+    userSnapshot = await getDoc(doc(db, 'users', normalizedUserId))
+  } catch (error) {
+    const isPermissionDenied = error?.code === 'permission-denied'
+
+    if (isPermissionDenied) {
+      throw new Error('Permission denied while reading user role. Deploy latest Firestore rules and ensure your users/{uid} profile exists.')
+    }
+
+    throw error
+  }
 
   if (!userSnapshot.exists()) {
     return null

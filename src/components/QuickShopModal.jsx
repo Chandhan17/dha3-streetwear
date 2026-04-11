@@ -245,28 +245,25 @@ function QuickShopModal({
       }
       const fullAddress = buildFullAddress(payload)
 
-      // Save order to Firestore
-      const orderData = {
-        customerName: payload.name,
-        customerPhone: payload.phone,
-        customerAddress: fullAddress,
-        customerDoorNo: payload.doorNo,
-        customerStreet: payload.street,
-        customerCity: payload.city,
-        customerPincode: payload.pincode,
-        customerState: payload.state,
-        productName: resolvedProductName,
-        productPrice: numericPrice,
+      await createOrder({
+        userId: auth.currentUser?.uid || 'guest',
         productId: product?.id || '',
+        quantity: 1,
         selectedSize: resolvedSize,
-        productImage: resolvedImageUrl,
+        customerDetails: {
+          name: payload.name,
+          phone: payload.phone,
+          doorNo: payload.doorNo,
+          street: payload.street,
+          city: payload.city,
+          pincode: payload.pincode,
+          state: payload.state,
+          notes: payload.notes,
+          address: fullAddress,
+        },
         paymentMethod: 'whatsapp',
-        paymentStatus: 'pending',
-        status: 'pending',
-        notes: payload.notes,
-      }
-
-      await createOrder(orderData)
+        orderStatus: 'pending',
+      })
 
       persistCustomerDetails(payload)
       if (onSubmit) {

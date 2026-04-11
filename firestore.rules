@@ -31,10 +31,16 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin();
     }
 
-    // Orders: users can create, admins have full control.
-    match /orders/{document=**} {
-      allow create: if isUser() || isAdmin();
-      allow read, update, delete: if isAdmin();
+    // Orders are backend-managed; clients can only read their own orders.
+    match /orders/{orderId} {
+      allow read: if isAdmin()
+                  || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow create, update, delete: if false;
+    }
+
+    // Payment intents are backend-only and never exposed to clients.
+    match /paymentIntents/{intentId} {
+      allow read, write: if false;
     }
 
     // Users can create/read/update their own profile document.
@@ -44,17 +50,14 @@ service cloud.firestore {
                     && request.resource.data.uid == request.auth.uid
                     && request.resource.data.role == 'user';
 
-      allow read: if isSignedIn() && request.auth.uid == userId
-                  || isAdmin();
+      allow read: if isSignedIn() && request.auth.uid == userId;
 
-      allow update: if isAdmin()
-                    || (isSignedIn()
-                        && request.auth.uid == userId
-                        && resource.data.role == 'user'
-                        && request.resource.data.role == 'user'
-                        && request.resource.data.uid == request.auth.uid);
+      allow update: if isSignedIn()
+                    && request.auth.uid == userId
+                    && request.resource.data.uid == request.auth.uid
+                    && request.resource.data.role == resource.data.role;
 
-      allow delete: if isAdmin();
+      allow delete: if false;
     }
   }
 }
