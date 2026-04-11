@@ -12,7 +12,7 @@ services:
       - key: NODE_VERSION
         value: 20
       - key: CORS_ORIGINS
-        value: https://dha3-streetwear.vercel.app/
+        value: https://dha3-streetwear.vercel.app
       - key: FIREBASE_PROJECT_ID
         sync: false
       - key: FIREBASE_CLIENT_EMAIL
