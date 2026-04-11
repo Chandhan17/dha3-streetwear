@@ -32,7 +32,7 @@ async function getAuthHeaders(requireAuth = false) {
 
 function normalizeDate(value) {
   if (!value) {
-    return new Date()
+    return null
   }
 
   if (value instanceof Date) {
@@ -43,8 +43,15 @@ function normalizeDate(value) {
     return value.toDate()
   }
 
+  const seconds = Number(value?.seconds ?? value?._seconds)
+  const nanoseconds = Number(value?.nanoseconds ?? value?._nanoseconds ?? 0)
+
+  if (Number.isFinite(seconds)) {
+    return new Date(seconds * 1000 + Math.floor(nanoseconds / 1000000))
+  }
+
   const asDate = new Date(value)
-  return Number.isNaN(asDate.getTime()) ? new Date() : asDate
+  return Number.isNaN(asDate.getTime()) ? null : asDate
 }
 
 function normalizeOrder(order) {

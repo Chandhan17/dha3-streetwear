@@ -215,6 +215,30 @@ async function buildServerPricedOrder(orderItems) {
   return { products, totalAmount }
 }
 
+function serializeTimestamp(value) {
+  if (!value) {
+    return null
+  }
+
+  if (typeof value.toDate === 'function') {
+    return value.toDate().toISOString()
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString()
+  }
+
+  const seconds = Number(value.seconds ?? value._seconds)
+  const nanoseconds = Number(value.nanoseconds ?? value._nanoseconds ?? 0)
+
+  if (Number.isFinite(seconds)) {
+    return new Date(seconds * 1000 + Math.floor(nanoseconds / 1000000)).toISOString()
+  }
+
+  const parsedDate = new Date(value)
+  return Number.isNaN(parsedDate.getTime()) ? null : parsedDate.toISOString()
+}
+
 function isSignatureValid(orderId, paymentId, incomingSignature) {
   const signatureBody = `${orderId}|${paymentId}`
   const generatedSignature = crypto
@@ -539,6 +563,8 @@ async function handleAdminGetOrders(req, res) {
     const orders = snapshot.docs.map((docSnapshot) => ({
       id: docSnapshot.id,
       ...docSnapshot.data(),
+      createdAt: serializeTimestamp(docSnapshot.data()?.createdAt),
+      updatedAt: serializeTimestamp(docSnapshot.data()?.updatedAt),
     }))
 
     return res.json({ success: true, orders })

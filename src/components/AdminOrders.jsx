@@ -18,6 +18,23 @@ const PAYMENT_STATUSES = [
   { value: 'paid', label: 'Paid', color: 'bg-green-100 text-green-800' },
 ]
 
+function formatDateTime(value) {
+  if (!value) {
+    return '-'
+  }
+
+  const date = value instanceof Date ? value : new Date(value)
+
+  if (Number.isNaN(date.getTime())) {
+    return '-'
+  }
+
+  return date.toLocaleString('en-IN', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  })
+}
+
 function Orders() {
   const [orders, setOrders] = useState([])
   const [isLoading, setIsLoading] = useState(true)
@@ -466,8 +483,7 @@ function Orders() {
 
                   {/* Date */}
                   <td className="px-6 py-4 text-sm text-black/70">
-                    {order.createdAt?.toLocaleDateString?.('en-IN') ||
-                      new Date(order.createdAt).toLocaleDateString('en-IN')}
+                    {formatDateTime(order.createdAt)}
                   </td>
 
                   {/* Actions */}
@@ -522,25 +538,24 @@ function Orders() {
 
                   <div>
                     <p className="text-xs font-semibold text-black/60 uppercase">Created</p>
-                    <p className="mt-1 text-sm text-obsidian">
-                      {order.createdAt?.toLocaleString?.() ||
-                        new Date(order.createdAt).toLocaleString()}
-                    </p>
+                    <p className="mt-1 text-sm text-obsidian">{formatDateTime(order.createdAt)}</p>
                   </div>
 
                   <div>
                     <p className="text-xs font-semibold text-black/60 uppercase">Customer Name</p>
-                    <p className="mt-1 text-sm text-obsidian">{order.customerName}</p>
+                    <p className="mt-1 text-sm text-obsidian">{order.customerName || '-'}</p>
                   </div>
 
                   <div>
                     <p className="text-xs font-semibold text-black/60 uppercase">Phone</p>
-                    <p className="mt-1 text-sm text-obsidian">{order.customerPhone}</p>
+                    <p className="mt-1 text-sm text-obsidian">{order.customerPhone || '-'}</p>
                   </div>
 
                   <div className="sm:col-span-2">
                     <p className="text-xs font-semibold text-black/60 uppercase">Address</p>
-                    <p className="mt-1 text-sm text-obsidian">{order.customerAddress}</p>
+                    <p className="mt-1 text-sm text-obsidian">
+                      {order.customerAddress || order.customerDetails?.address || '-'}
+                    </p>
                   </div>
 
                   <div>

@@ -83,13 +83,45 @@ function formatCurrency(value) {
   return `Rs. ${new Intl.NumberFormat('en-IN').format(Number(value || 0))}`
 }
 
-function formatDate(value) {
+function formatDateTime(value) {
   if (!value) {
     return '-'
   }
 
   const date = value instanceof Date ? value : new Date(value)
-  return Number.isNaN(date.getTime()) ? '-' : date.toLocaleDateString('en-IN')
+
+  if (Number.isNaN(date.getTime())) {
+    return '-'
+  }
+
+  return date.toLocaleString('en-IN', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  })
+}
+
+function getTimestampMs(value) {
+  if (!value) {
+    return null
+  }
+
+  if (value instanceof Date) {
+    return value.getTime()
+  }
+
+  if (typeof value?.toDate === 'function') {
+    return value.toDate().getTime()
+  }
+
+  const seconds = Number(value?.seconds ?? value?._seconds)
+  const nanoseconds = Number(value?.nanoseconds ?? value?._nanoseconds ?? 0)
+
+  if (Number.isFinite(seconds)) {
+    return seconds * 1000 + Math.floor(nanoseconds / 1000000)
+  }
+
+  const parsedDate = new Date(value)
+  return Number.isNaN(parsedDate.getTime()) ? null : parsedDate.getTime()
 }
 
 function getOrderStatusTone(status) {
@@ -142,6 +174,7 @@ function Admin() {
 
   const [orderStatusFilter, setOrderStatusFilter] = useState('all')
   const [orderSort, setOrderSort] = useState('newest')
+  const [selectedOrderId, setSelectedOrderId] = useState(null)
   const [deletingOrderId, setDeletingOrderId] = useState('')
   const [selectedOrderIds, setSelectedOrderIds] = useState([])
   const [bulkOrderStatus, setBulkOrderStatus] = useState('')
@@ -546,8 +579,8 @@ function Admin() {
     const map = new Map(days.map((item) => [item.key, item]))
 
     orders.forEach((order) => {
-      const createdAt = order.createdAt instanceof Date ? order.createdAt : new Date(order.createdAt)
-      const key = Number.isNaN(createdAt.getTime()) ? '' : createdAt.toISOString().slice(0, 10)
+      const timestampMs = getTimestampMs(order.createdAt)
+      const key = timestampMs ? new Date(timestampMs).toISOString().slice(0, 10) : ''
       const existing = map.get(key)
 
       if (existing) {
@@ -574,11 +607,16 @@ function Admin() {
     })
 
     return [...result].sort((a, b) => {
-      const left = a.createdAt instanceof Date ? a.createdAt.getTime() : new Date(a.createdAt).getTime()
-      const right = b.createdAt instanceof Date ? b.createdAt.getTime() : new Date(b.createdAt).getTime()
+      const left = getTimestampMs(a.createdAt) ?? 0
+      const right = getTimestampMs(b.createdAt) ?? 0
       return orderSort === 'newest' ? right - left : left - right
     })
   }, [orders, orderStatusFilter, orderSort, query])
+
+  const selectedOrder = useMemo(
+    () => filteredOrders.find((order) => order.id === selectedOrderId) || null,
+    [filteredOrders, selectedOrderId],
+  )
 
   const filteredOrderIds = useMemo(
     () => filteredOrders.map((order) => order.id),
@@ -1142,9 +1180,18 @@ function Admin() {
                     <td className="px-4 py-3">
                       <Badge tone={getOrderStatusTone(order.status)}>{order.status || 'pending'}</Badge>
                     </td>
-                    <td className="px-4 py-3 text-sm text-white/60">{formatDate(order.createdAt)}</td>
+                    <td className="px-4 py-3 text-sm text-white/60">{formatDateTime(order.createdAt)}</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
+                        <Button
+                          variant="secondary"
+                          className="px-3 py-2"
+                          onClick={() =>
+                            setSelectedOrderId(selectedOrderId === order.id ? null : order.id)
+                          }
+                        >
+                          {selectedOrderId === order.id ? 'Hide' : 'View'}
+                        </Button>
                         <select
                           value={order.status || 'pending'}
                           onChange={async (event) => {
@@ -1192,6 +1239,66 @@ function Admin() {
                   </tr>
                 ))}
               </Table>
+            )}
+
+            {selectedOrder && (
+              <div className="rounded-2xl border border-white/10 bg-[#111111] p-5 shadow-soft">
+                <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-4">
+                  <div>
+                    <h3 className="font-semibold text-white">Order Details</h3>
+                    <p className="text-xs text-white/50">Full customer and order information</p>
+                  </div>
+                  <Button variant="ghost" onClick={() => setSelectedOrderId(null)}>
+                    Close
+                  </Button>
+                </div>
+
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.12em] text-white/45">Customer Name</p>
+                    <p className="mt-1 text-sm text-white">{selectedOrder.customerName || 'Customer'}</p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.12em] text-white/45">Phone</p>
+                    <p className="mt-1 text-sm text-white">{selectedOrder.customerPhone || '-'}</p>
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <p className="text-xs uppercase tracking-[0.12em] text-white/45">Address</p>
+                    <p className="mt-1 text-sm text-white">
+                      {selectedOrder.customerAddress || selectedOrder.customerDetails?.address || '-'}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.12em] text-white/45">Product</p>
+                    <p className="mt-1 text-sm text-white">{selectedOrder.productName || 'Product'}</p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.12em] text-white/45">Size</p>
+                    <p className="mt-1 text-sm text-white">{selectedOrder.selectedSize || 'N/A'}</p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.12em] text-white/45">Ordered At</p>
+                    <p className="mt-1 text-sm text-white">{formatDateTime(selectedOrder.createdAt)}</p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.12em] text-white/45">Payment Method</p>
+                    <p className="mt-1 text-sm text-white capitalize">{selectedOrder.paymentMethod || '-'}</p>
+                  </div>
+
+                  {selectedOrder.notes && (
+                    <div className="md:col-span-2">
+                      <p className="text-xs uppercase tracking-[0.12em] text-white/45">Notes</p>
+                      <p className="mt-1 text-sm text-white">{selectedOrder.notes}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
             )}
           </div>
         )}
