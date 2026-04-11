@@ -6,7 +6,7 @@ export const clientConfig = {
   address: 'Vihanga 2, Beside Sai Baba Temple, YMR Colony, Proddatur',
   instagram: 'https://instagram.com/dha3.streetwear',
   logo: '/dha-logo.png',
-  heroImage: 'public/mens-hero.png',
+  heroImage: '/mens-hero.png',
   heroImagePosition: 'center center',
   productCategories: ['Shirts', 'T-Shirts', 'Jeans', 'Shoes', 'Accessories'],
   shopName: 'DHA THREE Streetwear',
