@@ -7,7 +7,6 @@ export const clientConfig = {
   instagram: 'https://instagram.com/dha3.streetwear',
   logo: '/dha-logo.png',
   heroImage: '/mens-hero.png',
-  heroImageMobilePosition: '78% center',
   heroImagePosition: 'center center',
   productCategories: ['Shirts', 'T-Shirts', 'Jeans', 'Shoes', 'Accessories'],
   shopName: 'DHA THREE Streetwear',

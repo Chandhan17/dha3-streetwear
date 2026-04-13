@@ -136,16 +136,6 @@
     will-change: transform;
   }
 
-  .hero-media {
-    object-position: var(--hero-mobile-position, center center);
-  }
-
-  @media (min-width: 768px) {
-    .hero-media {
-      object-position: var(--hero-desktop-position, center center);
-    }
-  }
-
   .size-shake {
     animation: sizeShake 320ms ease-in-out;
   }
