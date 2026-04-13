@@ -19,8 +19,11 @@ function Hero() {
           <img
             src={clientConfig.heroImage}
             alt={clientConfig.brandName}
-            className="h-full w-full object-contain object-center md:object-cover"
-            style={{ objectPosition: clientConfig.heroImagePosition || 'center center' }}
+            className="hero-media h-full w-full object-cover"
+            style={{
+              '--hero-mobile-position': clientConfig.heroImageMobilePosition || clientConfig.heroImagePosition || 'center center',
+              '--hero-desktop-position': clientConfig.heroImagePosition || 'center center',
+            }}
             loading="eager"
             fetchPriority="high"
             sizes="100vw"
