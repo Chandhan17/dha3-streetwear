@@ -23,7 +23,17 @@ export async function completePOSSale(payload) {
   return request('/api/admin/pos/sale', { method: 'POST', body: JSON.stringify(payload) })
 }
 
-export async function fetchPOSBills() {
-  const data = await request('/api/admin/pos/bills')
+function rangeToQuery(range) {
+  if (!range?.from || !range?.to) return ''
+  const from = new Date(`${range.from}T00:00:00`)
+  const to = new Date(`${range.to}T23:59:59.999`)
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) throw new Error('Invalid POS bill date range')
+  if (from > to) throw new Error('From date cannot be after To date')
+  const params = new URLSearchParams({ fromMs: String(from.getTime()), toMs: String(to.getTime()) })
+  return `?${params.toString()}`
+}
+
+export async function fetchPOSBills(range = null) {
+  const data = await request(`/api/admin/pos/bills${rangeToQuery(range)}`)
   return Array.isArray(data.bills) ? data.bills : []
 }
