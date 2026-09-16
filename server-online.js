@@ -3,7 +3,7 @@ import { fileURLToPath } from 'url'
 import { getApps } from 'firebase-admin/app'
 import { FieldValue, getFirestore } from 'firebase-admin/firestore'
 import './server-pos.js'
-import { app } from './server.js'
+import { app, getRuntimeDependencies } from './server.js'
 
 const PRODUCT_COLLECTION = 'products'
 const ORDER_COLLECTION = 'orders'
@@ -23,11 +23,87 @@ function normalizeCheckoutItems(items) {
   items.forEach((item) => {
     const productId = String(item?.productId || '').trim()
     const quantity = Math.max(1, Number(item?.quantity || 1))
+    const selectedSize = String(item?.selectedSize || 'N/A').trim() || 'N/A'
     if (!productId || !Number.isFinite(quantity)) return
-    merged.set(productId, (merged.get(productId) || 0) + quantity)
+    const existing = merged.get(productId)
+    merged.set(productId, { quantity: (existing?.quantity || 0) + quantity, selectedSize })
   })
-  return [...merged.entries()].map(([productId, quantity]) => ({ productId, quantity }))
+  return [...merged.entries()].map(([productId, value]) => ({ productId, ...value }))
 }
+
+function normalizeDiscountPercent(value) {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return 0
+  return Math.min(100, Math.max(0, Math.round(number * 100) / 100))
+}
+
+async function buildDiscountedPaymentIntent(items, discountPercent) {
+  if (!firestore) throw new Error('Server not configured')
+  const snapshots = await Promise.all(items.map((item) => firestore.collection(PRODUCT_COLLECTION).doc(item.productId).get()))
+  const products = snapshots.map((snapshot, index) => {
+    const requested = items[index]
+    if (!snapshot.exists) throw new Error(`Product not found: ${requested.productId}`)
+    const product = snapshot.data() || {}
+    const unitPrice = money(product.price ?? product.salePrice)
+    const stock = Number(product.stock ?? product.openingStock ?? 0)
+    if (unitPrice <= 0) throw new Error(`Invalid sale price for ${String(product.name || requested.productId)}`)
+    if (!Number.isFinite(stock) || stock <= 0) throw new Error(`Product out of stock: ${String(product.name || requested.productId)}`)
+    if (requested.quantity > stock) throw new Error(`Only ${stock} unit(s) available for ${String(product.name || requested.productId)}`)
+    return {
+      productId: requested.productId,
+      name: String(product.name || 'Product').trim() || 'Product',
+      imageUrl: String(product.imageUrl || product.image || '').trim(),
+      selectedSize: requested.selectedSize,
+      quantity: requested.quantity,
+      unitPrice,
+      lineTotal: money(unitPrice * requested.quantity),
+    }
+  })
+  const subtotal = money(products.reduce((sum, item) => sum + item.lineTotal, 0))
+  const safeDiscountPercent = normalizeDiscountPercent(discountPercent)
+  const discountAmount = money(Math.min(subtotal, subtotal * safeDiscountPercent / 100))
+  const totalAmount = money(subtotal - discountAmount)
+  if (subtotal <= 0 || totalAmount <= 0) throw new Error('Calculated amount is invalid')
+  return { products, subtotal, discountPercent: safeDiscountPercent, discountAmount, totalAmount }
+}
+
+app.post('/api/online/create-payment-order', async (req, res) => {
+  try {
+    if (!firestore) return res.status(503).json({ success: false, error: 'Server not configured' })
+    const { razorpay } = getRuntimeDependencies()
+    if (!razorpay) return res.status(503).json({ success: false, error: 'Payment service not configured' })
+
+    const items = normalizeCheckoutItems(req.body?.items)
+    if (!items.length) return res.status(400).json({ success: false, error: 'At least one product is required' })
+
+    const currency = String(req.body?.currency || 'INR').trim() || 'INR'
+    const userId = String(req.body?.userId || 'guest').trim() || 'guest'
+    const customerDetails = req.body?.customerDetails && typeof req.body.customerDetails === 'object' ? req.body.customerDetails : {}
+    const { products, subtotal, discountPercent, discountAmount, totalAmount } = await buildDiscountedPaymentIntent(items, req.body?.discountPercent)
+    const order = await razorpay.orders.create({ amount: Math.round(totalAmount * 100), currency, receipt: `receipt_${Date.now()}`, notes: { itemCount: String(products.length), discountPercent: String(discountPercent) } })
+
+    await firestore.collection(PAYMENT_INTENT_COLLECTION).doc(order.id).set({
+      userId,
+      products,
+      subtotal,
+      discountPercent,
+      discountAmount,
+      totalAmount,
+      currency,
+      customerDetails,
+      verified: false,
+      stored: false,
+      createdAt: FieldValue.serverTimestamp(),
+    })
+
+    return res.json({ success: true, orderId: order.id, amount: order.amount, currency: order.currency, subtotal, discountPercent, discountAmount, totalAmount, products })
+  } catch (error) {
+    console.error('Online payment order creation error:', error)
+    const message = String(error?.message || '')
+    if (message.startsWith('Product not found') || message.startsWith('Product out of stock') || message.startsWith('Only ')) return res.status(409).json({ success: false, error: message })
+    return res.status(500).json({ success: false, error: 'Failed to create online payment order' })
+  }
+})
 
 app.post('/api/online/check-stock', async (req, res) => {
   try {
@@ -52,9 +128,7 @@ app.post('/api/online/check-stock', async (req, res) => {
   } catch (error) {
     console.error('Online stock check error:', error)
     const message = String(error?.message || '')
-    if (message.startsWith('Product not found') || message.startsWith('Insufficient stock') || message.startsWith('Only ')) {
-      return res.status(409).json({ success: false, error: message })
-    }
+    if (message.startsWith('Product not found') || message.startsWith('Insufficient stock') || message.startsWith('Only ')) return res.status(409).json({ success: false, error: message })
     return res.status(500).json({ success: false, error: 'Failed to check product stock' })
   }
 })
@@ -73,7 +147,6 @@ app.post('/api/online/complete-order', async (req, res) => {
 
     const intent = intentSnapshot.data() || {}
     if (!intent.verified || !intent.paymentId) return res.status(400).json({ success: false, error: 'Payment must be verified before completing the order' })
-
     if (intent.inventoryProcessed && intent.orderDocumentId) return res.json({ success: true, message: 'Order already completed', orderDocumentId: intent.orderDocumentId })
 
     const sourceItems = Array.isArray(intent.products) ? intent.products : []
@@ -105,10 +178,13 @@ app.post('/api/online/complete-order', async (req, res) => {
       })
 
       const totalAmount = money(intent.totalAmount)
+      const discountAmount = money(intent.discountAmount)
+      const discountPercent = normalizeDiscountPercent(intent.discountPercent)
+      const subtotal = money(intent.subtotal || (totalAmount + discountAmount))
       const profit = money(totalAmount - totalCost)
-      transaction.set(orderRef, { userId: String(intent.userId || 'guest').trim() || 'guest', products, totalAmount, currency: String(intent.currency || 'INR').trim() || 'INR', paymentId: String(intent.paymentId), paymentOrderId, paymentStatus: 'paid', paymentMethod: 'razorpay', orderStatus: requestedStatus, customerDetails: intent.customerDetails || {}, cost: money(totalCost), profit, margin: totalAmount > 0 ? money((profit / totalAmount) * 100) : 0, inventoryProcessed: true, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() })
+      transaction.set(orderRef, { userId: String(intent.userId || 'guest').trim() || 'guest', products, subtotal, discountPercent, discountAmount, totalAmount, currency: String(intent.currency || 'INR').trim() || 'INR', paymentId: String(intent.paymentId), paymentOrderId, paymentStatus: 'paid', paymentMethod: 'razorpay', orderStatus: requestedStatus, customerDetails: intent.customerDetails || {}, cost: money(totalCost), profit, margin: totalAmount > 0 ? money((profit / totalAmount) * 100) : 0, inventoryProcessed: true, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() })
       transaction.set(intentRef, { stored: true, inventoryProcessed: true, orderDocumentId: orderRef.id, completedAt: FieldValue.serverTimestamp() }, { merge: true })
-      return { orderDocumentId: orderRef.id, totalAmount, cost: money(totalCost), profit }
+      return { orderDocumentId: orderRef.id, totalAmount, cost: money(totalCost), profit, subtotal, discountPercent, discountAmount }
     })
 
     return res.status(201).json({ success: true, ...result })
