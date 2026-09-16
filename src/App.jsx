@@ -34,6 +34,7 @@ function App() {
         <Route path="/admin/pos" element={<ProtectedRoute><POS /></ProtectedRoute>} />
         <Route path="/admin/inventory" element={<ProtectedRoute><Inventory /></ProtectedRoute>} />
         <Route path="/admin/pos/bills" element={<ProtectedRoute><POSBills /></ProtectedRoute>} />
+        <Route path="/admin/products" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
         <Route path="/admin/products/import" element={<ProtectedRoute><ProductImport /></ProtectedRoute>} />
         <Route path="/admin/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
       </Routes>
