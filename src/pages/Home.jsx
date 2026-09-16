@@ -32,7 +32,7 @@ function matchesPriceRange(price, selectedPriceRange) {
 
 function Home() {
   const navigate = useNavigate()
-  const { addToCart } = useCart()
+  const { addToCart, clearCart } = useCart()
   const [products, setProducts] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
@@ -95,9 +95,11 @@ function Home() {
       showError('This product is currently out of stock')
       return
     }
+    // Buy Now starts a new checkout; it must not keep items from a previous Buy Now flow.
+    clearCart()
     addToCart(product, { selectedSize, quantity: 1 })
     navigate('/cart')
-  }, [addToCart, navigate, showError])
+  }, [addToCart, clearCart, navigate, showError])
 
   const hasActiveSearch = normalizeValue(searchQuery).length > 0
   const hasNoResults = !isLoading && products.length > 0 && categorySections.length === 0
