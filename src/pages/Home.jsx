@@ -16,6 +16,7 @@ import { useBrandedNotification } from '../hooks/useBrandedNotification'
 import { fetchProducts } from '../services/productService'
 
 const FALLBACK_CATEGORY = 'Uncategorized'
+const BUY_NOW_CHECKOUT_KEY = 'dhaThreeStreetwearBuyNowCheckout'
 const fadeUpTransition = { duration: 0.65, ease: [0.22, 1, 0.36, 1] }
 const fadeUpInitial = { opacity: 0, y: 28 }
 const fadeUpInView = { opacity: 1, y: 0 }
@@ -95,9 +96,9 @@ function Home() {
       showError('This product is currently out of stock')
       return
     }
-    // Buy Now starts a new checkout; it must not keep items from a previous Buy Now flow.
     clearCart()
     addToCart(product, { selectedSize, quantity: 1 })
+    try { window.sessionStorage.setItem(BUY_NOW_CHECKOUT_KEY, '1') } catch { /* Ignore storage failures. */ }
     navigate('/cart')
   }, [addToCart, clearCart, navigate, showError])
 
