@@ -30,7 +30,11 @@ export const storeVerifiedOrder = async (payload) => post('/api/store-order', pa
 
 export const validateOnlineStock = async (items) => {
   const normalizedItems = Array.isArray(items)
-    ? items.map((item) => ({ productId: String(item?.productId || '').trim(), quantity: Math.max(1, Number(item?.quantity || 1)) })).filter((item) => item.productId)
+    ? items.map((item) => ({
+        productId: String(item?.productId || '').trim(),
+        quantity: Math.max(1, Number(item?.quantity || 1)),
+        selectedSize: String(item?.selectedSize || 'N/A').trim() || 'N/A',
+      })).filter((item) => item.productId)
     : []
   if (!normalizedItems.length) throw new Error('Product details are required')
   return post('/api/online/check-stock', { items: normalizedItems })
