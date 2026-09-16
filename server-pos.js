@@ -1,6 +1,7 @@
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { FieldValue } from 'firebase-admin/firestore'
+import { getApps } from 'firebase-admin/app'
+import { getFirestore, FieldValue } from 'firebase-admin/firestore'
 import { app, attachUserFromToken, isAdmin } from './server.js'
 
 const PRODUCT_COLLECTION = 'products'
@@ -17,15 +18,18 @@ function asMoney(value) {
   return Number.isFinite(number) ? Math.round(number * 100) / 100 : 0
 }
 
+function getFirestoreInstance() {
+  const firebaseApp = getApps()[0]
+  return firebaseApp ? getFirestore(firebaseApp) : null
+}
+
 function normalizeItems(items) {
   if (!Array.isArray(items)) return []
-
   const merged = new Map()
   items.forEach((item) => {
     const productId = String(item?.productId || '').trim()
     const quantity = asPositiveInteger(item?.quantity)
     if (!productId || !quantity) return
-
     const existing = merged.get(productId)
     merged.set(productId, {
       productId,
@@ -33,38 +37,27 @@ function normalizeItems(items) {
       selectedSize: String(item?.selectedSize || 'N/A').trim() || 'N/A',
     })
   })
-
   return [...merged.values()]
 }
 
 function createBillNumber() {
-  const date = new Date()
-  const datePart = date.toISOString().slice(0, 10).replaceAll('-', '')
+  const datePart = new Date().toISOString().slice(0, 10).replaceAll('-', '')
   const randomPart = Math.random().toString(36).slice(2, 8).toUpperCase()
   return `POS-${datePart}-${randomPart}`
 }
 
 app.post('/api/admin/pos/sale', attachUserFromToken, isAdmin, async (req, res) => {
   try {
-    const db = (await import('./server.js')).getRuntimeDependencies?.()
-    const firestore = db?.firestore
-
-    if (!firestore) {
-      return res.status(503).json({ success: false, message: 'Server not configured' })
-    }
+    const firestore = getFirestoreInstance()
+    if (!firestore) return res.status(503).json({ success: false, message: 'Server not configured' })
 
     const items = normalizeItems(req.body?.items)
     const paymentMethod = String(req.body?.paymentMethod || '').trim().toLowerCase()
     const customer = req.body?.customer && typeof req.body.customer === 'object' ? req.body.customer : {}
     const discount = asMoney(req.body?.discount)
 
-    if (items.length === 0) {
-      return res.status(400).json({ success: false, message: 'At least one valid item is required' })
-    }
-
-    if (!['cash', 'upi', 'card'].includes(paymentMethod)) {
-      return res.status(400).json({ success: false, message: 'Payment method must be cash, upi, or card' })
-    }
+    if (items.length === 0) return res.status(400).json({ success: false, message: 'At least one valid item is required' })
+    if (!['cash', 'upi', 'card'].includes(paymentMethod)) return res.status(400).json({ success: false, message: 'Payment method must be cash, upi, or card' })
 
     const productRefs = items.map((item) => firestore.collection(PRODUCT_COLLECTION).doc(item.productId))
     const billRef = firestore.collection(POS_BILL_COLLECTION).doc()
@@ -80,9 +73,7 @@ app.post('/api/admin/pos/sale', attachUserFromToken, isAdmin, async (req, res) =
 
       snapshots.forEach((snapshot, index) => {
         const item = items[index]
-        if (!snapshot.exists) {
-          throw new Error(`Product not found: ${item.productId}`)
-        }
+        if (!snapshot.exists) throw new Error(`Product not found: ${item.productId}`)
 
         const product = snapshot.data() || {}
         const currentStock = Number(product.stock ?? product.openingStock ?? 0)
@@ -90,12 +81,8 @@ app.post('/api/admin/pos/sale', attachUserFromToken, isAdmin, async (req, res) =
         const purchasePrice = asMoney(product.purchasePrice ?? product.prchPrice ?? product.costPrice)
         const gstPercent = Math.max(0, asMoney(product.gstPercent ?? product.gst ?? 0))
 
-        if (!Number.isFinite(currentStock) || currentStock < item.quantity) {
-          throw new Error(`Insufficient stock for ${String(product.name || item.productId)}`)
-        }
-        if (unitPrice <= 0) {
-          throw new Error(`Invalid sale price for ${String(product.name || item.productId)}`)
-        }
+        if (!Number.isFinite(currentStock) || currentStock < item.quantity) throw new Error(`Insufficient stock for ${String(product.name || item.productId)}`)
+        if (unitPrice <= 0) throw new Error(`Invalid sale price for ${String(product.name || item.productId)}`)
 
         const lineSubtotal = asMoney(unitPrice * item.quantity)
         subtotal = asMoney(subtotal + lineSubtotal)
@@ -117,7 +104,6 @@ app.post('/api/admin/pos/sale', attachUserFromToken, isAdmin, async (req, res) =
 
       const safeDiscount = Math.min(discount, subtotal)
       const discountRatio = subtotal > 0 ? (subtotal - safeDiscount) / subtotal : 0
-
       saleItems.forEach((item) => {
         item.discountedLineTotal = asMoney(item.lineSubtotal * discountRatio)
         item.gstAmount = asMoney(item.discountedLineTotal * item.gstPercent / 100)
@@ -133,11 +119,7 @@ app.post('/api/admin/pos/sale', attachUserFromToken, isAdmin, async (req, res) =
         const currentStock = Number(snapshots[index].data()?.stock ?? snapshots[index].data()?.openingStock ?? 0)
         const newStock = asMoney(currentStock - item.quantity)
 
-        transaction.update(productRef, {
-          stock: newStock,
-          updatedAt: FieldValue.serverTimestamp(),
-        })
-
+        transaction.update(productRef, { stock: newStock, updatedAt: FieldValue.serverTimestamp() })
         transaction.set(inventoryRef, {
           productId: item.productId,
           type: 'sale',
@@ -155,10 +137,7 @@ app.post('/api/admin/pos/sale', attachUserFromToken, isAdmin, async (req, res) =
       transaction.set(billRef, {
         billNo,
         billType: 'POS',
-        customer: {
-          name: String(customer.name || '').trim(),
-          phone: String(customer.phone || '').trim(),
-        },
+        customer: { name: String(customer.name || '').trim(), phone: String(customer.phone || '').trim() },
         items: saleItems,
         subtotal,
         discount: safeDiscount,
@@ -175,50 +154,28 @@ app.post('/api/admin/pos/sale', attachUserFromToken, isAdmin, async (req, res) =
         updatedAt: FieldValue.serverTimestamp(),
       })
 
-      return {
-        billId: billRef.id,
-        billNo,
-        items: saleItems,
-        subtotal,
-        discount: safeDiscount,
-        gst: gstTotal,
-        total: totalAmount,
-        cost: costTotal,
-        profit,
-        margin: totalAmount > 0 ? asMoney((profit / totalAmount) * 100) : 0,
-        paymentMethod,
-      }
+      return { billId: billRef.id, billNo, items: saleItems, subtotal, discount: safeDiscount, gst: gstTotal, total: totalAmount, cost: costTotal, profit, margin: totalAmount > 0 ? asMoney((profit / totalAmount) * 100) : 0, paymentMethod }
     })
 
     return res.status(201).json({ success: true, bill: result })
   } catch (error) {
     console.error('POS sale error:', error)
     const message = String(error?.message || '')
-    if (message.startsWith('Product not found') || message.startsWith('Insufficient stock') || message.startsWith('Invalid sale price')) {
-      return res.status(409).json({ success: false, message })
-    }
+    if (message.startsWith('Product not found') || message.startsWith('Insufficient stock') || message.startsWith('Invalid sale price')) return res.status(409).json({ success: false, message })
     return res.status(500).json({ success: false, message: 'Failed to complete POS sale' })
   }
 })
 
 app.get('/api/admin/pos/bills', attachUserFromToken, isAdmin, async (req, res) => {
   try {
-    const db = (await import('./server.js')).getRuntimeDependencies?.()
-    const firestore = db?.firestore
+    const firestore = getFirestoreInstance()
     if (!firestore) return res.status(503).json({ success: false, message: 'Server not configured' })
-
-    const snapshot = await firestore
-      .collection(POS_BILL_COLLECTION)
-      .orderBy('createdAt', 'desc')
-      .limit(200)
-      .get()
-
+    const snapshot = await firestore.collection(POS_BILL_COLLECTION).orderBy('createdAt', 'desc').limit(200).get()
     const bills = snapshot.docs.map((doc) => {
       const data = doc.data() || {}
       const createdAt = data.createdAt?.toDate?.()?.toISOString?.() || null
       return { id: doc.id, ...data, createdAt }
     })
-
     return res.json({ success: true, bills })
   } catch (error) {
     console.error('POS bills fetch error:', error)
@@ -228,10 +185,7 @@ app.get('/api/admin/pos/bills', attachUserFromToken, isAdmin, async (req, res) =
 
 const currentModulePath = fileURLToPath(import.meta.url)
 const executedFilePath = process.argv[1] ? path.resolve(process.argv[1]) : ''
-
 if (executedFilePath && executedFilePath === currentModulePath) {
   const port = Number(process.env.PORT || 5000)
-  app.listen(port, () => {
-    console.info(`POS backend running on http://localhost:${port}`)
-  })
+  app.listen(port, () => console.info(`POS backend running on http://localhost:${port}`))
 }
