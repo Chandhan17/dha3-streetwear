@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import Footer from '../components/Footer'
 import Navbar from '../components/Navbar'
 import BrandedNotification from '../components/BrandedNotification'
@@ -34,41 +34,19 @@ function buildFullAddress({ doorNo, street, city, pincode, state }) {
   return [doorNo, street, city, pincode, state].map((value) => String(value || '').trim()).filter(Boolean).join(', ')
 }
 
-function money(value) {
-  const number = Number(value)
-  return Number.isFinite(number) ? Math.round(number * 100) / 100 : 0
-}
-
 function CartPage() {
   const { items, cartCount, cartTotal, updateQuantity, removeFromCart, clearCart } = useCart()
   const { errorMessage, showError, clearError } = useBrandedNotification()
   const [customerDetails, setCustomerDetails] = useState(() => readStoredCustomerDetails())
-  const [discountPercent, setDiscountPercent] = useState(0)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  const formattedSubtotal = useMemo(() => new Intl.NumberFormat('en-IN').format(money(cartTotal)), [cartTotal])
-  const safeDiscountPercent = Math.min(100, Math.max(0, Number(discountPercent) || 0))
-  const discountAmount = useMemo(() => money(cartTotal * safeDiscountPercent / 100), [cartTotal, safeDiscountPercent])
-  const payableTotal = useMemo(() => money(Math.max(0, cartTotal - discountAmount)), [cartTotal, discountAmount])
-  const formattedDiscount = useMemo(() => new Intl.NumberFormat('en-IN').format(discountAmount), [discountAmount])
-  const formattedTotal = useMemo(() => new Intl.NumberFormat('en-IN').format(payableTotal), [payableTotal])
+  const formattedTotal = useMemo(() => new Intl.NumberFormat('en-IN').format(money(cartTotal)), [cartTotal])
   const hasItems = items.length > 0
 
   const handleInputChange = (event) => {
     const { name, value } = event.target
     setCustomerDetails((currentDetails) => ({ ...currentDetails, [name]: value }))
     clearError()
-  }
-
-  const handleDiscountChange = (event) => {
-    const value = event.target.value
-    if (value === '') {
-      setDiscountPercent('')
-      return
-    }
-    const numericValue = Number(value)
-    if (!Number.isFinite(numericValue)) return
-    setDiscountPercent(Math.min(100, Math.max(0, numericValue)))
   }
 
   const validateDetails = () => {
@@ -128,7 +106,6 @@ function CartPage() {
         customerPhone: customerDetails.phone.trim(),
         customerEmail: '',
         productImage: items[0]?.imageUrl || '/dha-logo.png',
-        discountPercent: safeDiscountPercent,
         onSuccess: async () => {
           clearCart()
         },
@@ -166,10 +143,8 @@ function CartPage() {
           <aside className="space-y-4">
             <section className="street-panel p-5 md:p-6"><h2 className="font-display text-2xl">Checkout</h2><div className="mt-4 space-y-3">{['name', 'phone', 'doorNo', 'street', 'city', 'pincode', 'state'].map((field) => <input key={field} name={field} value={customerDetails[field]} onChange={handleInputChange} placeholder={field === 'doorNo' ? 'Door No' : field.charAt(0).toUpperCase() + field.slice(1)} disabled={isSubmitting} className="w-full rounded-2xl border border-white/10 bg-black/60 px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-white/30" />)}<textarea name="notes" value={customerDetails.notes} onChange={handleInputChange} rows={3} placeholder="Notes (optional)" disabled={isSubmitting} className="w-full rounded-2xl border border-white/10 bg-black/60 px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-white/30" /></div></section>
             <section className="street-panel p-5 md:p-6">
-              <div className="flex items-center justify-between text-sm text-white/65"><span>Subtotal</span><span>₹{formattedSubtotal}</span></div>
-              <div className="mt-3 flex items-center gap-3"><label htmlFor="online-discount" className="shrink-0 text-sm text-white/65">Discount</label><div className="relative flex-1"><input id="online-discount" type="number" min="0" max="100" step="0.01" value={discountPercent} onChange={handleDiscountChange} disabled={!hasItems || isSubmitting} placeholder="0" className="w-full rounded-2xl border border-white/10 bg-black/60 px-4 py-3 pr-10 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-white/30" /><span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-sm text-white/45">%</span></div></div>
-              <div className="mt-3 flex items-center justify-between text-sm text-white/65"><span>Discount Amount</span><span>- ₹{formattedDiscount}</span></div>
-              <div className="mt-2 flex items-center justify-between text-base font-semibold text-white"><span>Payable Total</span><span>₹{formattedTotal}</span></div>
+              <div className="flex items-center justify-between text-sm text-white/65"><span>Subtotal</span><span>₹{formattedTotal}</span></div>
+              <div className="mt-2 flex items-center justify-between text-base font-semibold text-white"><span>Total</span><span>₹{formattedTotal}</span></div>
               <p className="mt-3 text-xs text-white/45">Online orders require 100% payment through Razorpay. Paid orders are then forwarded to WhatsApp for store confirmation.</p>
               <button type="button" onClick={handleRazorpayCheckout} disabled={!hasItems || isSubmitting} className="mt-5 w-full rounded-full border border-white/20 bg-white px-4 py-3 text-sm font-semibold uppercase tracking-[0.14em] text-black transition hover:-translate-y-0.5 hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50">{isSubmitting ? 'Processing Payment...' : 'Pay 100% with Razorpay'}</button>
               <button type="button" onClick={clearCart} disabled={!hasItems || isSubmitting} className="mt-3 w-full rounded-full border border-white/15 px-4 py-3 text-sm font-semibold uppercase tracking-[0.14em] text-white/70 transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50">Clear Cart</button>
@@ -180,6 +155,11 @@ function CartPage() {
       <Footer />
     </div>
   )
+}
+
+function money(value) {
+  const number = Number(value)
+  return Number.isFinite(number) ? Math.round(number * 100) / 100 : 0
 }
 
 export default CartPage
