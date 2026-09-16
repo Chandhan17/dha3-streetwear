@@ -25,16 +25,41 @@ function normalizeCheckoutItems(items) {
     const quantity = Math.max(1, Number(item?.quantity || 1))
     const selectedSize = String(item?.selectedSize || 'N/A').trim() || 'N/A'
     if (!productId || !Number.isFinite(quantity)) return
-    const existing = merged.get(productId)
-    merged.set(productId, { quantity: (existing?.quantity || 0) + quantity, selectedSize })
+    const key = `${productId}::${selectedSize}`
+    const existing = merged.get(key)
+    merged.set(key, { productId, quantity: Math.min(1, (existing?.quantity || 0) + quantity), selectedSize })
   })
-  return [...merged.entries()].map(([productId, value]) => ({ productId, ...value }))
+  return [...merged.values()]
 }
 
 function normalizeDiscountPercent(value) {
   const number = Number(value)
   if (!Number.isFinite(number)) return 0
   return Math.min(100, Math.max(0, Math.round(number * 100) / 100))
+}
+
+function normalizeSizes(value) {
+  if (Array.isArray(value)) return [...new Set(value.map((item) => String(item || '').trim()).filter(Boolean))]
+  if (typeof value === 'string') return [...new Set(value.split(',').map((item) => String(item || '').trim()).filter(Boolean))]
+  if (value && typeof value === 'object') return Object.entries(value).filter(([, enabled]) => Boolean(enabled)).map(([size]) => String(size || '').trim()).filter(Boolean)
+  return []
+}
+
+function getSizeStock(product) {
+  const sizes = normalizeSizes(product?.sizes)
+  if (!sizes.length) return {}
+  const source = product?.sizeStock && typeof product.sizeStock === 'object' ? product.sizeStock : {}
+  return Object.fromEntries(sizes.map((size) => [size, source[size] !== undefined ? (Number(source[size]) > 0 ? 1 : 0) : 1]))
+}
+
+function validateRequestedSize(product, requested) {
+  const sizes = normalizeSizes(product?.sizes)
+  if (!sizes.length) return
+  if (requested.selectedSize === 'N/A' || !sizes.includes(requested.selectedSize)) throw new Error(`Please select a valid size for ${String(product.name || requested.productId)}`)
+  const sizeStock = getSizeStock(product)
+  const available = Number(sizeStock[requested.selectedSize] || 0)
+  if (available <= 0) throw new Error(`Size ${requested.selectedSize} is sold out for ${String(product.name || requested.productId)}`)
+  if (requested.quantity > available) throw new Error(`Only 1 unit of size ${requested.selectedSize} is available for ${String(product.name || requested.productId)}`)
 }
 
 async function buildDiscountedPaymentIntent(items, discountPercent) {
@@ -47,6 +72,7 @@ async function buildDiscountedPaymentIntent(items, discountPercent) {
     const unitPrice = money(product.price ?? product.salePrice)
     const stock = Number(product.stock ?? product.openingStock ?? 0)
     if (unitPrice <= 0) throw new Error(`Invalid sale price for ${String(product.name || requested.productId)}`)
+    validateRequestedSize(product, requested)
     if (!Number.isFinite(stock) || stock <= 0) throw new Error(`Product out of stock: ${String(product.name || requested.productId)}`)
     if (requested.quantity > stock) throw new Error(`Only ${stock} unit(s) available for ${String(product.name || requested.productId)}`)
     return {
@@ -82,25 +108,13 @@ app.post('/api/online/create-payment-order', async (req, res) => {
     const { products, subtotal, discountPercent, discountAmount, totalAmount } = await buildDiscountedPaymentIntent(items, req.body?.discountPercent)
     const order = await razorpay.orders.create({ amount: Math.round(totalAmount * 100), currency, receipt: `receipt_${Date.now()}`, notes: { itemCount: String(products.length), discountPercent: String(discountPercent) } })
 
-    await firestore.collection(PAYMENT_INTENT_COLLECTION).doc(order.id).set({
-      userId,
-      products,
-      subtotal,
-      discountPercent,
-      discountAmount,
-      totalAmount,
-      currency,
-      customerDetails,
-      verified: false,
-      stored: false,
-      createdAt: FieldValue.serverTimestamp(),
-    })
+    await firestore.collection(PAYMENT_INTENT_COLLECTION).doc(order.id).set({ userId, products, subtotal, discountPercent, discountAmount, totalAmount, currency, customerDetails, verified: false, stored: false, createdAt: FieldValue.serverTimestamp() })
 
     return res.json({ success: true, orderId: order.id, amount: order.amount, currency: order.currency, subtotal, discountPercent, discountAmount, totalAmount, products })
   } catch (error) {
     console.error('Online payment order creation error:', error)
     const message = String(error?.message || '')
-    if (message.startsWith('Product not found') || message.startsWith('Product out of stock') || message.startsWith('Only ')) return res.status(409).json({ success: false, error: message })
+    if (message.startsWith('Product not found') || message.startsWith('Product out of stock') || message.startsWith('Only ') || message.startsWith('Size ') || message.startsWith('Please select')) return res.status(409).json({ success: false, error: message })
     return res.status(500).json({ success: false, error: 'Failed to create online payment order' })
   }
 })
@@ -119,16 +133,19 @@ app.post('/api/online/check-stock', async (req, res) => {
       if (!snapshot.exists) throw new Error(`Product not found: ${requested.productId}`)
       const product = snapshot.data() || {}
       const stock = Number(product.stock ?? product.openingStock ?? 0)
+      validateRequestedSize(product, requested)
       if (!Number.isFinite(stock) || stock <= 0) throw new Error(`Insufficient stock for ${String(product.name || requested.productId)}`)
       if (requested.quantity > stock) throw new Error(`Only ${stock} unit(s) available for ${String(product.name || requested.productId)}`)
-      checkedItems.push({ productId: requested.productId, quantity: requested.quantity, stock })
+      const sizes = normalizeSizes(product.sizes)
+      const sizeAvailable = sizes.length ? Number(getSizeStock(product)[requested.selectedSize] || 0) : null
+      checkedItems.push({ productId: requested.productId, quantity: requested.quantity, selectedSize: requested.selectedSize, stock, sizeAvailable })
     })
 
     return res.json({ success: true, items: checkedItems })
   } catch (error) {
     console.error('Online stock check error:', error)
     const message = String(error?.message || '')
-    if (message.startsWith('Product not found') || message.startsWith('Insufficient stock') || message.startsWith('Only ')) return res.status(409).json({ success: false, error: message })
+    if (message.startsWith('Product not found') || message.startsWith('Insufficient stock') || message.startsWith('Only ') || message.startsWith('Size ') || message.startsWith('Please select')) return res.status(409).json({ success: false, error: message })
     return res.status(500).json({ success: false, error: 'Failed to check product stock' })
   }
 })
@@ -165,16 +182,23 @@ app.post('/api/online/complete-order', async (req, res) => {
         const requested = sourceItems[index]
         if (!snapshot.exists) throw new Error(`Product not found: ${requested.productId}`)
         const product = snapshot.data() || {}
-        const quantity = Math.max(1, Number(requested.quantity || 1))
+        const quantity = Math.min(1, Math.max(1, Number(requested.quantity || 1)))
         const currentStock = Number(product.stock ?? product.openingStock ?? 0)
         const purchasePrice = money(product.purchasePrice ?? product.prchPrice ?? product.costPrice)
+        const sizes = normalizeSizes(product.sizes)
+        const sizeStock = sizes.length ? getSizeStock(product) : {}
+        if (sizes.length) {
+          if (requested.selectedSize === 'N/A' || !sizes.includes(String(requested.selectedSize || '').trim())) throw new Error(`Please select a valid size for ${String(product.name || requested.productId)}`)
+          if (Number(sizeStock[requested.selectedSize] || 0) <= 0) throw new Error(`Size ${requested.selectedSize} is sold out for ${String(product.name || requested.productId)}`)
+        }
         if (!Number.isFinite(currentStock) || currentStock < quantity) throw new Error(`Insufficient stock for ${String(product.name || requested.productId)}`)
-        const newStock = currentStock - quantity
         const unitPrice = money(product.price ?? requested.unitPrice)
+        const nextStock = currentStock - quantity
+        const nextSizeStock = sizes.length ? { ...sizeStock, [requested.selectedSize]: 0 } : null
         products.push({ productId: String(requested.productId), name: String(product.name || requested.name || 'Product').trim() || 'Product', imageUrl: String(product.imageUrl || product.image || requested.imageUrl || '').trim(), selectedSize: String(requested.selectedSize || 'N/A').trim() || 'N/A', quantity, unitPrice, purchasePrice, lineTotal: money(unitPrice * quantity) })
         totalCost += purchasePrice * quantity
-        transaction.update(productRefs[index], { stock: newStock, updatedAt: FieldValue.serverTimestamp() })
-        transaction.set(inventoryRefs[index], { productId: String(requested.productId), type: 'sale', quantity: -quantity, stockBefore: currentStock, stockAfter: newStock, referenceId: orderRef.id, billNo: paymentOrderId, reason: 'Online Razorpay sale', paymentOrderId, createdAt: FieldValue.serverTimestamp() })
+        transaction.update(productRefs[index], sizes.length ? { stock: nextStock, sizeStock: nextSizeStock, updatedAt: FieldValue.serverTimestamp() } : { stock: nextStock, updatedAt: FieldValue.serverTimestamp() })
+        transaction.set(inventoryRefs[index], { productId: String(requested.productId), type: 'sale', quantity: -quantity, stockBefore: currentStock, stockAfter: nextStock, selectedSize: String(requested.selectedSize || 'N/A').trim() || 'N/A', referenceId: orderRef.id, billNo: paymentOrderId, reason: 'Online Razorpay sale', paymentOrderId, createdAt: FieldValue.serverTimestamp() })
       })
 
       const totalAmount = money(intent.totalAmount)
@@ -191,7 +215,7 @@ app.post('/api/online/complete-order', async (req, res) => {
   } catch (error) {
     console.error('Online order completion error:', error)
     const message = String(error?.message || '')
-    if (message.startsWith('Product not found') || message.startsWith('Insufficient stock')) return res.status(409).json({ success: false, error: message })
+    if (message.startsWith('Product not found') || message.startsWith('Insufficient stock') || message.startsWith('Size ') || message.startsWith('Please select')) return res.status(409).json({ success: false, error: message })
     return res.status(500).json({ success: false, error: 'Failed to complete online order' })
   }
 })
