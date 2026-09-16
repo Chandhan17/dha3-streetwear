@@ -34,34 +34,55 @@ function buildFullAddress({ doorNo, street, city, pincode, state }) {
   return [doorNo, street, city, pincode, state].map((value) => String(value || '').trim()).filter(Boolean).join(', ')
 }
 
-function buildWhatsAppMessage({ customerDetails, items, orderId, amount }) {
-  const productLines = items.map((item, index) => {
-    const size = item.selectedSize && item.selectedSize !== 'N/A' ? `, Size ${item.selectedSize}` : ''
-    return `${index + 1}. ${item.name}${size} x ${item.quantity} - ₹${money(Number(item.price || 0) * Number(item.quantity || 0)).toLocaleString('en-IN')}`
+function formatCustomerField(value, fallback = 'N/A') {
+  const normalized = String(value || '').trim()
+  return normalized || fallback
+}
+
+function buildWhatsAppMessage({ customerDetails, items, orderId, paymentId, amount }) {
+  const productBlocks = items.map((item) => {
+    const price = money(Number(item.price || 0))
+    const size = formatCustomerField(item.selectedSize)
+    const image = formatCustomerField(item.imageUrl)
+
+    return [
+      `Product: ${formatCustomerField(item.name)}`,
+      `Price: ₹${price.toLocaleString('en-IN')}`,
+      `Size: ${size}`,
+      `Image: ${image}`,
+    ].join('\n')
   })
 
   const address = buildFullAddress(customerDetails)
   return [
-    `Hello ${clientConfig.shopName}, I have completed an online payment and placed an order.`,
+    'Hi, I want to confirm my order:',
     '',
-    `Order ID: ${orderId || 'N/A'}`,
-    `Customer: ${customerDetails.name.trim()}`,
-    `Phone: ${customerDetails.phone.trim()}`,
-    address ? `Address: ${address}` : '',
-    customerDetails.notes.trim() ? `Notes: ${customerDetails.notes.trim()}` : '',
+    productBlocks.join('\n\n'),
     '',
-    'Items:',
-    ...productLines,
+    '✅ Payment Status: Paid',
+    `Payment ID: ${formatCustomerField(paymentId)}`,
+    `Order ID: ${formatCustomerField(orderId)}`,
     '',
-    `Paid Amount: ₹${money(amount).toLocaleString('en-IN')}`,
-  ].filter(Boolean).join('\n')
+    'Customer Details:',
+    `Name: ${formatCustomerField(customerDetails.name)}`,
+    `Phone: ${formatCustomerField(customerDetails.phone)}`,
+    `Door No: ${formatCustomerField(customerDetails.doorNo)}`,
+    `Street: ${formatCustomerField(customerDetails.street)}`,
+    `City: ${formatCustomerField(customerDetails.city)}`,
+    `Pincode: ${formatCustomerField(customerDetails.pincode)}`,
+    `State: ${formatCustomerField(customerDetails.state)}`,
+    `Address: ${formatCustomerField(address)}`,
+    `Notes: ${formatCustomerField(customerDetails.notes)}`,
+    '',
+    `Total Paid: ₹${money(amount).toLocaleString('en-IN')}`,
+  ].join('\n')
 }
 
-function openWhatsAppOrderMessage({ customerDetails, items, orderId, amount }) {
+function openWhatsAppOrderMessage({ customerDetails, items, orderId, paymentId, amount }) {
   const whatsappNumber = String(clientConfig.whatsappNumber || clientConfig.whatsapp || '').replace(/\D/g, '')
   if (!whatsappNumber) throw new Error('WhatsApp number is not configured')
 
-  const message = buildWhatsAppMessage({ customerDetails, items, orderId, amount })
+  const message = buildWhatsAppMessage({ customerDetails, items, orderId, paymentId, amount })
   const whatsappUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`
 
   window.location.href = whatsappUrl
@@ -139,7 +160,7 @@ function CartPage() {
         customerPhone: customerDetails.phone.trim(),
         customerEmail: '',
         productImage: items[0]?.imageUrl || '/dha-logo.png',
-        onSuccess: async ({ orderId, amount }) => {
+        onSuccess: async ({ orderId, paymentId, amount }) => {
           const purchasedItems = [...items]
           const purchasedCustomerDetails = { ...customerDetails }
           clearCart()
@@ -149,6 +170,7 @@ function CartPage() {
               customerDetails: purchasedCustomerDetails,
               items: purchasedItems,
               orderId,
+              paymentId,
               amount,
             })
           } catch (error) {
