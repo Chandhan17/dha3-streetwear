@@ -23,18 +23,43 @@ function getFirestoreInstance() {
   return firebaseApp ? getFirestore(firebaseApp) : null
 }
 
+function normalizeSizes(value) {
+  if (Array.isArray(value)) return [...new Set(value.map((item) => String(item || '').trim()).filter(Boolean))]
+  if (typeof value === 'string') return [...new Set(value.split(',').map((item) => String(item || '').trim()).filter(Boolean))]
+  if (value && typeof value === 'object') return Object.entries(value).filter(([, enabled]) => Boolean(enabled)).map(([size]) => String(size || '').trim()).filter(Boolean)
+  return []
+}
+
+function getSizeStock(product) {
+  const sizes = normalizeSizes(product?.sizes)
+  if (!sizes.length) return {}
+  const source = product?.sizeStock && typeof product.sizeStock === 'object' ? product.sizeStock : {}
+  return Object.fromEntries(sizes.map((size) => [size, source[size] !== undefined ? (Number(source[size]) > 0 ? 1 : 0) : 1]))
+}
+
+function validateRequestedSize(product, item) {
+  const sizes = normalizeSizes(product?.sizes)
+  if (!sizes.length) return
+  if (item.selectedSize === 'N/A' || !sizes.includes(item.selectedSize)) throw new Error(`Please select a valid size for ${String(product.name || item.productId)}`)
+  const available = Number(getSizeStock(product)[item.selectedSize] || 0)
+  if (available <= 0) throw new Error(`Size ${item.selectedSize} is sold out for ${String(product.name || item.productId)}`)
+  if (item.quantity > available) throw new Error(`Only 1 unit of size ${item.selectedSize} is available for ${String(product.name || item.productId)}`)
+}
+
 function normalizeItems(items) {
   if (!Array.isArray(items)) return []
   const merged = new Map()
   items.forEach((item) => {
     const productId = String(item?.productId || '').trim()
     const quantity = asPositiveInteger(item?.quantity)
+    const selectedSize = String(item?.selectedSize || 'N/A').trim() || 'N/A'
     if (!productId || !quantity) return
-    const existing = merged.get(productId)
-    merged.set(productId, {
+    const key = `${productId}::${selectedSize}`
+    const existing = merged.get(key)
+    merged.set(key, {
       productId,
-      quantity: (existing?.quantity || 0) + quantity,
-      selectedSize: String(item?.selectedSize || 'N/A').trim() || 'N/A',
+      quantity: Math.min(1, (existing?.quantity || 0) + quantity),
+      selectedSize,
     })
   })
   return [...merged.values()]
@@ -129,6 +154,7 @@ app.post('/api/admin/pos/sale', attachUserFromToken, isAdmin, async (req, res) =
         const unitPrice = asMoney(product.price ?? product.salePrice)
         const purchasePrice = asMoney(product.purchasePrice ?? product.prchPrice ?? product.costPrice)
         const gstPercent = Math.max(0, asMoney(product.gstPercent ?? product.gst ?? 0))
+        validateRequestedSize(product, item)
         if (!Number.isFinite(currentStock) || currentStock < item.quantity) throw new Error(`Insufficient stock for ${String(product.name || item.productId)}`)
         if (unitPrice <= 0) throw new Error(`Invalid sale price for ${String(product.name || item.productId)}`)
 
@@ -152,10 +178,17 @@ app.post('/api/admin/pos/sale', attachUserFromToken, isAdmin, async (req, res) =
       saleItems.forEach((item, index) => {
         const productRef = productRefs[index]
         const inventoryRef = inventoryRefs[index]
-        const currentStock = Number(snapshots[index].data()?.stock ?? snapshots[index].data()?.openingStock ?? 0)
+        const productData = snapshots[index].data() || {}
+        const currentStock = Number(productData.stock ?? productData.openingStock ?? 0)
         const newStock = currentStock - item.quantity
-        transaction.update(productRef, { stock: newStock, updatedAt: FieldValue.serverTimestamp() })
-        transaction.set(inventoryRef, { productId: item.productId, type: 'sale', quantity: -item.quantity, stockBefore: currentStock, stockAfter: newStock, referenceId: billRef.id, billNo, reason: 'POS sale', createdBy: req.user.uid, createdAt: FieldValue.serverTimestamp() })
+        const sizes = normalizeSizes(productData.sizes)
+        const nextSizeStock = sizes.length
+          ? { ...getSizeStock(productData), [item.selectedSize]: 0 }
+          : null
+        transaction.update(productRef, sizes.length
+          ? { stock: newStock, sizeStock: nextSizeStock, updatedAt: FieldValue.serverTimestamp() }
+          : { stock: newStock, updatedAt: FieldValue.serverTimestamp() })
+        transaction.set(inventoryRef, { productId: item.productId, type: 'sale', quantity: -item.quantity, stockBefore: currentStock, stockAfter: newStock, selectedSize: item.selectedSize, referenceId: billRef.id, billNo, reason: 'POS sale', createdBy: req.user.uid, createdAt: FieldValue.serverTimestamp() })
       })
 
       transaction.set(billRef, {
@@ -186,7 +219,7 @@ app.post('/api/admin/pos/sale', attachUserFromToken, isAdmin, async (req, res) =
   } catch (error) {
     console.error('POS sale error:', error)
     const message = String(error?.message || '')
-    if (message.startsWith('Product not found') || message.startsWith('Insufficient stock') || message.startsWith('Invalid sale price')) return res.status(409).json({ success: false, message })
+    if (message.startsWith('Product not found') || message.startsWith('Insufficient stock') || message.startsWith('Invalid sale price') || message.startsWith('Size ') || message.startsWith('Please select')) return res.status(409).json({ success: false, message })
     return res.status(500).json({ success: false, message: 'Failed to complete POS sale' })
   }
 })
@@ -201,23 +234,12 @@ app.get('/api/admin/pos/bills', attachUserFromToken, isAdmin, async (req, res) =
     const hasFrom = Number.isFinite(fromMs)
     const hasTo = Number.isFinite(toMs)
 
-    if ((hasFrom && !hasTo) || (!hasFrom && hasTo)) {
-      return res.status(400).json({ success: false, message: 'Both fromMs and toMs are required for date filtering' })
-    }
-
-    if (hasFrom && hasTo && fromMs > toMs) {
-      return res.status(400).json({ success: false, message: 'fromMs cannot be greater than toMs' })
-    }
+    if ((hasFrom && !hasTo) || (!hasFrom && hasTo)) return res.status(400).json({ success: false, message: 'Both fromMs and toMs are required for date filtering' })
+    if (hasFrom && hasTo && fromMs > toMs) return res.status(400).json({ success: false, message: 'fromMs cannot be greater than toMs' })
 
     let query = firestore.collection(POS_BILL_COLLECTION)
-    if (hasFrom && hasTo) {
-      query = query
-        .where('createdAt', '>=', new Date(fromMs))
-        .where('createdAt', '<=', new Date(toMs))
-        .orderBy('createdAt', 'desc')
-    } else {
-      query = query.orderBy('createdAt', 'desc').limit(200)
-    }
+    if (hasFrom && hasTo) query = query.where('createdAt', '>=', new Date(fromMs)).where('createdAt', '<=', new Date(toMs)).orderBy('createdAt', 'desc')
+    else query = query.orderBy('createdAt', 'desc').limit(200)
 
     const snapshot = await query.get()
     const bills = snapshot.docs.map((doc) => {
