@@ -94,6 +94,7 @@ function CartPage() {
   const [customerDetails, setCustomerDetails] = useState(() => readStoredCustomerDetails())
   const [isSubmitting, setIsSubmitting] = useState(false)
   const clearCartRef = useRef(clearCart)
+  const buyNowCleanupTimerRef = useRef(null)
   clearCartRef.current = clearCart
 
   useEffect(() => {
@@ -102,9 +103,18 @@ function CartPage() {
     if (!isBuyNowCheckout) return undefined
 
     return () => {
-      try { window.sessionStorage.removeItem(BUY_NOW_CHECKOUT_KEY) } catch { /* Ignore storage failures. */ }
-      clearCartRef.current()
+      // React Strict Mode performs a development-only setup/cleanup cycle immediately
+      // after mount. Delay the cleanup so a genuine route change clears the temporary
+      // Buy Now cart while the Strict Mode remount can cancel the scheduled cleanup.
+      buyNowCleanupTimerRef.current = window.setTimeout(() => {
+        try { window.sessionStorage.removeItem(BUY_NOW_CHECKOUT_KEY) } catch { /* Ignore storage failures. */ }
+        clearCartRef.current()
+      }, 0)
     }
+  }, [])
+
+  useEffect(() => () => {
+    if (buyNowCleanupTimerRef.current) window.clearTimeout(buyNowCleanupTimerRef.current)
   }, [])
 
   const formattedTotal = useMemo(() => new Intl.NumberFormat('en-IN').format(money(cartTotal)), [cartTotal])
