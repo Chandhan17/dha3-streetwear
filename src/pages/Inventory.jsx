@@ -9,13 +9,36 @@ import { fetchProducts } from '../services/productService'
 import { adjustInventory } from '../services/inventoryService'
 import { barcodeSvg } from '../utils/barcode'
 
-function printBarcode(product) {
-  const barcode = product.barcode || ''
-  if (!barcode) return
-  const svg = barcodeSvg(barcode)
-  const printWindow = window.open('', '_blank', 'width=500,height=400')
+const escapeHtml = (value) => String(value ?? '').replace(/[&<>\"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;' }[character]))
+
+function printBarcodeLabels(product, quantity) {
+  const barcode = String(product.barcode || '').trim()
+  const labelCount = Number(quantity)
+  if (!barcode || !Number.isInteger(labelCount) || labelCount < 1 || labelCount > 1000) return
+
+  const svg = barcodeSvg(barcode, { width: 300, height: 105 })
+  const labels = Array.from({ length: labelCount }, () => `
+    <div class="label">
+      <div class="name">${escapeHtml(product.name || 'Product')}</div>
+      ${svg}
+      <div class="price">MRP ₹${Number(product.mrp || product.price || 0).toFixed(2)}</div>
+    </div>
+  `).join('')
+
+  const printWindow = window.open('', '_blank', 'width=600,height=700')
   if (!printWindow) return
-  printWindow.document.write(`<!doctype html><html><head><title>Barcode - ${String(product.name || '').replace(/</g, '&lt;')}</title><style>@page{size:auto;margin:8mm}body{margin:0;background:#fff;font-family:Arial,sans-serif}.label{width:58mm;min-height:32mm;padding:4mm;box-sizing:border-box;text-align:center}.name{font-size:12px;font-weight:700;margin-bottom:2mm;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.price{font-size:11px;margin-top:1mm}</style></head><body><div class="label"><div class="name">${String(product.name || 'Product').replace(/[&<>]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}</div>${svg}<div class="price">MRP ₹${Number(product.mrp || product.price || 0).toFixed(2)}</div></div><script>window.onload=()=>{window.print();window.onafterprint=()=>window.close()}</script></body></html>`)
+  printWindow.document.write(`<!doctype html><html><head><title>Barcode Labels - ${escapeHtml(product.name)}</title><style>
+    @page { size: auto; margin: 0; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: #fff; }
+    body { font-family: Arial, sans-serif; }
+    .label { width: 58mm; min-height: 32mm; padding: 2.5mm 3mm; display: flex; flex-direction: column; align-items: center; justify-content: center; page-break-after: always; break-after: page; overflow: hidden; }
+    .label:last-child { page-break-after: auto; break-after: auto; }
+    .name { width: 100%; font-size: 11px; line-height: 1.2; font-weight: 700; text-align: center; margin-bottom: 1mm; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    svg { width: 100%; max-width: 52mm; height: auto; display: block; }
+    .price { font-size: 10px; line-height: 1.1; font-weight: 700; margin-top: 0.5mm; }
+    @media screen { body { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px; } .label { border: 1px dashed #aaa; page-break-after: auto; } }
+  </style></head><body>${labels}<script>window.onload=()=>{window.print();window.onafterprint=()=>window.close()}</script></body></html>`)
   printWindow.document.close()
 }
 
@@ -26,13 +49,21 @@ function Inventory() {
   const [isLoading, setIsLoading] = useState(true)
   const [savingId, setSavingId] = useState('')
   const [quantities, setQuantities] = useState({})
+  const [labelQuantities, setLabelQuantities] = useState({})
   const [message, setMessage] = useState('')
 
   const loadProducts = async () => {
     setIsLoading(true)
-    try { setProducts(await fetchProducts({ forceRefresh: true })); setMessage('') }
-    catch (error) { setMessage(error.message || 'Unable to load inventory.') }
-    finally { setIsLoading(false) }
+    try {
+      const nextProducts = await fetchProducts({ forceRefresh: true })
+      setProducts(nextProducts)
+      setLabelQuantities((current) => Object.fromEntries(nextProducts.map((product) => [product.id, current[product.id] || Math.max(1, Number(product.stock || 1))])))
+      setMessage('')
+    } catch (error) {
+      setMessage(error.message || 'Unable to load inventory.')
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   useEffect(() => { loadProducts() }, [])
@@ -45,15 +76,36 @@ function Inventory() {
 
   const updateStock = async (product, direction) => {
     const amount = Number(quantities[product.id])
-    if (!Number.isInteger(amount) || amount <= 0) { setMessage('Enter a whole-number quantity greater than 0.'); return }
+    if (!Number.isInteger(amount) || amount <= 0) {
+      setMessage('Enter a whole-number quantity greater than 0.')
+      return
+    }
     const delta = direction === 'in' ? amount : -amount
-    setSavingId(product.id); setMessage('')
+    setSavingId(product.id)
+    setMessage('')
     try {
       const result = await adjustInventory({ productId: product.id, quantity: delta, reason: direction === 'in' ? 'Stock received' : 'Manual stock correction' })
       setProducts((current) => current.map((item) => item.id === product.id ? { ...item, stock: result.inventory.stockAfter } : item))
       setQuantities((current) => ({ ...current, [product.id]: '' }))
-    } catch (error) { setMessage(error.message || 'Unable to update stock.') }
-    finally { setSavingId('') }
+      setLabelQuantities((current) => ({ ...current, [product.id]: Math.max(1, Number(result.inventory.stockAfter || 1)) }))
+    } catch (error) {
+      setMessage(error.message || 'Unable to update stock.')
+    } finally {
+      setSavingId('')
+    }
+  }
+
+  const handlePrint = (product) => {
+    const quantity = Number(labelQuantities[product.id] || product.stock || 1)
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 1000) {
+      setMessage('Label quantity must be a whole number between 1 and 1000.')
+      return
+    }
+    if (!product.barcode) {
+      setMessage('This product does not have a barcode yet. Edit/save the product first.')
+      return
+    }
+    printBarcodeLabels(product, quantity)
   }
 
   const handleNavigation = (key) => {
@@ -66,14 +118,57 @@ function Inventory() {
     <AdminLayout activeKey="inventory" onChangeKey={handleNavigation} title="Inventory" query="" onQueryChange={() => {}} onLogout={async () => navigate('/login', { replace: true })}>
       <div className="space-y-5">
         <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
-          <div><p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#c19a6b]">Central stock</p><h1 className="mt-1 text-2xl font-semibold text-white">Inventory Management</h1><p className="mt-1 text-sm text-white/50">Adjust stock here; POS sales automatically deduct from the same stock.</p></div>
-          <Button variant="secondary" onClick={() => navigate('/admin/pos')}>Open POS</Button>
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#c19a6b]">Central stock</p>
+            <h1 className="mt-1 text-2xl font-semibold text-white">Inventory Management</h1>
+            <p className="mt-1 text-sm text-white/50">Adjust stock here; POS and online sales use the same stock.</p>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={() => navigate('/admin/products/import')}>Import Products</Button>
+            <Button variant="secondary" onClick={() => navigate('/admin/pos')}>Open POS</Button>
+          </div>
         </div>
-        <div className="flex gap-2"><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, SKU or barcode..." className="min-w-0 flex-1 rounded-xl border border-white/15 bg-[#111111] px-4 py-3 text-sm text-white outline-none focus:border-[#c19a6b]" /><Button variant="secondary" onClick={loadProducts}>Refresh</Button></div>
+
+        <div className="rounded-2xl border border-white/10 bg-[#111111] p-4 text-sm text-white/55 shadow-soft">
+          <span className="font-semibold text-white">Thermal labels:</span> set the number of stickers to print for each product, then click Print Label. The current layout is optimized for a small 58 × 32 mm-style label and can be adjusted when the client's actual sticker size is confirmed.
+        </div>
+
+        <div className="flex gap-2">
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, SKU or barcode..." className="min-w-0 flex-1 rounded-xl border border-white/15 bg-[#111111] px-4 py-3 text-sm text-white outline-none focus:border-[#c19a6b]" />
+          <Button variant="secondary" onClick={loadProducts}>Refresh</Button>
+        </div>
+
         {message && <div className="rounded-xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">{message}</div>}
         {isLoading && <Loader label="Loading inventory" />}
         {!isLoading && filteredProducts.length === 0 && <EmptyState title="No products found" description="Add products first, then initialize their stock here." />}
-        {!isLoading && filteredProducts.length > 0 && <div className="overflow-x-auto rounded-2xl border border-white/10 bg-[#111111] shadow-soft"><table className="w-full min-w-[980px] text-left"><thead><tr className="border-b border-white/10 text-[11px] uppercase tracking-[0.12em] text-white/45"><th className="px-4 py-3">Product</th><th className="px-4 py-3">SKU / Barcode</th><th className="px-4 py-3">Current Stock</th><th className="px-4 py-3">Adjustment</th><th className="px-4 py-3">Barcode</th></tr></thead><tbody>{filteredProducts.map((product) => { const stock = Number(product.stock ?? 0); const isSaving = savingId === product.id; return <tr key={product.id} className="border-b border-white/5"><td className="px-4 py-4"><p className="text-sm font-medium text-white">{product.name}</p><p className="text-xs text-white/40">{product.category || 'Uncategorized'}</p></td><td className="px-4 py-4 text-xs text-white/50">{product.sku || '-'}<br />{product.barcode || '-'}</td><td className="px-4 py-4"><Badge tone={stock > 0 ? 'success' : 'danger'}>{stock} unit(s)</Badge></td><td className="px-4 py-4"><div className="flex items-center gap-2"><input type="number" min="1" step="1" value={quantities[product.id] || ''} onChange={(event) => setQuantities((current) => ({ ...current, [product.id]: event.target.value }))} placeholder="Qty" className="w-24 rounded-xl border border-white/15 bg-[#0b0b0b] px-3 py-2 text-sm text-white outline-none focus:border-[#c19a6b]" /><Button disabled={isSaving} onClick={() => updateStock(product, 'in')}>+ Stock</Button><Button variant="danger" disabled={isSaving || stock <= 0} onClick={() => updateStock(product, 'out')}>- Stock</Button></div></td><td className="px-4 py-4"><Button variant="secondary" disabled={!product.barcode} onClick={() => printBarcode(product)}>Print Label</Button></td></tr> })}</tbody></table></div>}
+
+        {!isLoading && filteredProducts.length > 0 && (
+          <div className="overflow-x-auto rounded-2xl border border-white/10 bg-[#111111] shadow-soft">
+            <table className="w-full min-w-[1120px] text-left">
+              <thead>
+                <tr className="border-b border-white/10 text-[11px] uppercase tracking-[0.12em] text-white/45">
+                  <th className="px-4 py-3">Product</th><th className="px-4 py-3">SKU / Barcode</th><th className="px-4 py-3">Current Stock</th><th className="px-4 py-3">Adjustment</th><th className="px-4 py-3">Label Qty</th><th className="px-4 py-3">Print</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredProducts.map((product) => {
+                  const stock = Number(product.stock ?? 0)
+                  const isSaving = savingId === product.id
+                  return (
+                    <tr key={product.id} className="border-b border-white/5">
+                      <td className="px-4 py-4"><p className="text-sm font-medium text-white">{product.name}</p><p className="text-xs text-white/40">{product.category || 'Uncategorized'}</p></td>
+                      <td className="px-4 py-4 text-xs text-white/50">{product.sku || '-'}<br />{product.barcode || '-'}</td>
+                      <td className="px-4 py-4"><Badge tone={stock > 0 ? 'success' : 'danger'}>{stock} unit(s)</Badge></td>
+                      <td className="px-4 py-4"><div className="flex items-center gap-2"><input type="number" min="1" step="1" value={quantities[product.id] || ''} onChange={(event) => setQuantities((current) => ({ ...current, [product.id]: event.target.value }))} placeholder="Qty" className="w-24 rounded-xl border border-white/15 bg-[#0b0b0b] px-3 py-2 text-sm text-white outline-none focus:border-[#c19a6b]" /><Button disabled={isSaving} onClick={() => updateStock(product, 'in')}>+ Stock</Button><Button variant="danger" disabled={isSaving || stock <= 0} onClick={() => updateStock(product, 'out')}>- Stock</Button></div></td>
+                      <td className="px-4 py-4"><input type="number" min="1" max="1000" step="1" value={labelQuantities[product.id] || ''} onChange={(event) => setLabelQuantities((current) => ({ ...current, [product.id]: event.target.value }))} className="w-24 rounded-xl border border-white/15 bg-[#0b0b0b] px-3 py-2 text-sm text-white outline-none focus:border-[#c19a6b]" /></td>
+                      <td className="px-4 py-4"><Button variant="secondary" disabled={!product.barcode} onClick={() => handlePrint(product)}>Print Label</Button></td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </AdminLayout>
   )
