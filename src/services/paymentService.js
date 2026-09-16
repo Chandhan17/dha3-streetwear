@@ -47,6 +47,7 @@ export const initiatePayment = async ({
   customerPhone,
   customerEmail = '',
   productImage = '/logo.png',
+  discountPercent = 0,
   onSuccess,
   onFailure,
 }) => {
@@ -67,7 +68,14 @@ export const initiatePayment = async ({
 
     await validateOnlineStock(finalItems)
 
-    const orderData = await createOrder({ items: finalItems, userId, customerDetails, currency: 'INR' })
+    const orderData = await post('/api/online/create-payment-order', {
+      items: finalItems,
+      userId,
+      customerDetails,
+      currency: 'INR',
+      discountPercent: Number(discountPercent || 0),
+    })
+
     if (!window.Razorpay) throw new Error('Razorpay script not loaded. Please refresh the page.')
 
     const options = {
@@ -79,13 +87,21 @@ export const initiatePayment = async ({
       image: productImage,
       order_id: orderData.orderId,
       prefill: { name: customerName, contact: customerPhone, email: customerEmail },
-      notes: { productName },
+      notes: { productName, discountPercent: String(orderData.discountPercent || 0) },
       theme: { color: '#000000' },
       handler: async (response) => {
         try {
           await verifyPayment(response.razorpay_order_id, response.razorpay_payment_id, response.razorpay_signature)
           const completed = await post('/api/online/complete-order', { orderId: response.razorpay_order_id, orderStatus: 'processing' })
-          onSuccess?.({ paymentId: response.razorpay_payment_id, orderId: response.razorpay_order_id, amount: Number(orderData.totalAmount || 0), orderDocumentId: completed.orderDocumentId || '' })
+          onSuccess?.({
+            paymentId: response.razorpay_payment_id,
+            orderId: response.razorpay_order_id,
+            amount: Number(orderData.totalAmount || 0),
+            subtotal: Number(orderData.subtotal || 0),
+            discountPercent: Number(orderData.discountPercent || 0),
+            discountAmount: Number(orderData.discountAmount || 0),
+            orderDocumentId: completed.orderDocumentId || '',
+          })
         } catch (error) {
           console.error('Online payment completion failed:', error)
           onFailure?.(error)
