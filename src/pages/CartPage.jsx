@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Footer from '../components/Footer'
 import Navbar from '../components/Navbar'
 import BrandedNotification from '../components/BrandedNotification'
@@ -93,18 +93,19 @@ function CartPage() {
   const { errorMessage, showError, clearError } = useBrandedNotification()
   const [customerDetails, setCustomerDetails] = useState(() => readStoredCustomerDetails())
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const clearCartRef = useRef(clearCart)
+  clearCartRef.current = clearCart
 
   useEffect(() => {
-    let shouldClearOnExit = false
-    try { shouldClearOnExit = window.sessionStorage.getItem(BUY_NOW_CHECKOUT_KEY) === '1' } catch { /* Ignore storage failures. */ }
-    if (shouldClearOnExit) {
-      return () => {
-        try { window.sessionStorage.removeItem(BUY_NOW_CHECKOUT_KEY) } catch { /* Ignore storage failures. */ }
-        clearCart()
-      }
+    let isBuyNowCheckout = false
+    try { isBuyNowCheckout = window.sessionStorage.getItem(BUY_NOW_CHECKOUT_KEY) === '1' } catch { /* Ignore storage failures. */ }
+    if (!isBuyNowCheckout) return undefined
+
+    return () => {
+      try { window.sessionStorage.removeItem(BUY_NOW_CHECKOUT_KEY) } catch { /* Ignore storage failures. */ }
+      clearCartRef.current()
     }
-    return undefined
-  }, [clearCart])
+  }, [])
 
   const formattedTotal = useMemo(() => new Intl.NumberFormat('en-IN').format(money(cartTotal)), [cartTotal])
   const hasItems = items.length > 0
@@ -134,7 +135,8 @@ function CartPage() {
       const hasSizes = Array.isArray(product?.sizes) && product.sizes.length > 0
       const sizeStock = product?.sizeStock && typeof product.sizeStock === 'object' ? product.sizeStock : {}
       const selectedSize = String(item.selectedSize || 'N/A').trim() || 'N/A'
-      const sizeAvailable = hasSizes ? Number(sizeStock[selectedSize] ?? 0) : null
+      const sizeKey = Object.keys(sizeStock).find((key) => String(key).trim().toLowerCase() === selectedSize.toLowerCase())
+      const sizeAvailable = hasSizes ? Number(sizeStock[sizeKey] ?? 0) : null
       if (!product || (hasSizes ? !Number.isFinite(sizeAvailable) || sizeAvailable <= 0 : !Number.isFinite(stock) || stock <= 0)) {
         unavailable.push(hasSizes ? `Size ${selectedSize} of ${item.name} is out of stock` : `${item.name} is out of stock`)
       } else if (item.quantity > (hasSizes ? sizeAvailable : stock)) {
@@ -186,13 +188,7 @@ function CartPage() {
           clearCart()
 
           try {
-            openWhatsAppOrderMessage({
-              customerDetails: purchasedCustomerDetails,
-              items: purchasedItems,
-              orderId,
-              paymentId,
-              amount,
-            })
+            openWhatsAppOrderMessage({ customerDetails: purchasedCustomerDetails, items: purchasedItems, orderId, paymentId, amount })
           } catch (error) {
             showError(error.message || 'Payment succeeded, but WhatsApp could not be opened')
           }
