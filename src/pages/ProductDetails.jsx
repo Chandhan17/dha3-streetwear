@@ -95,6 +95,7 @@ function ProductDetails() {
   const hasSizeChartImage = Boolean(sizeChartImageUrl) && failedSizeChartImage !== sizeChartImageUrl
   const normalizedSizes = normalizeSizes(product?.sizes)
   const hasSizes = normalizedSizes.length > 0
+  const sizeStock = product?.sizeStock && typeof product.sizeStock === 'object' ? product.sizeStock : {}
   const stock = Number(product?.stock ?? 0)
   const isOutOfStock = Number.isFinite(stock) && stock <= 0
 
@@ -114,6 +115,10 @@ function ProductDetails() {
       setShowSizeError(true)
       triggerSizeShake()
       showError('Please select a size')
+      return false
+    }
+    if (hasSizes && selectedSize && Object.prototype.hasOwnProperty.call(sizeStock, selectedSize) && Number(sizeStock[selectedSize]) <= 0) {
+      showError(`Size ${selectedSize} is sold out`)
       return false
     }
     return true
@@ -174,7 +179,7 @@ function ProductDetails() {
                   <div className="rounded-xl border border-red-400/30 bg-red-400/10 px-4 py-3 text-sm font-semibold text-red-200">Out of Stock</div>
                 ) : (
                   <>
-                    <SizeSelector sizes={normalizedSizes} selectedSize={selectedSize} hasError={showSizeError} isShaking={isSizeShakeActive} onSelectSize={(size) => { setSelectedSize(size); setShowSizeError(false); setIsSizeShakeActive(false) }} />
+                    <SizeSelector sizes={normalizedSizes} selectedSize={selectedSize} sizeStock={sizeStock} hasError={showSizeError} isShaking={isSizeShakeActive} onSelectSize={(size) => { setSelectedSize(size); setShowSizeError(false); setIsSizeShakeActive(false) }} />
                     <div className="grid gap-3 sm:grid-cols-3">
                       <button type="button" onClick={handleAddToCart} className="inline-flex w-full items-center justify-center rounded-full border border-white/15 bg-white/5 px-5 py-3 text-sm font-semibold uppercase tracking-[0.08em] text-white transition hover:-translate-y-0.5 hover:bg-white/10">Add to Cart</button>
                       <button type="button" onClick={handleBuyNow} className="inline-flex w-full items-center justify-center rounded-full border border-white/15 bg-white px-5 py-3 text-sm font-semibold uppercase tracking-[0.08em] text-black transition hover:-translate-y-0.5 hover:bg-white/90">Buy Now</button>
