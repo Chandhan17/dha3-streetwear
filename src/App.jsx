@@ -7,6 +7,8 @@ const Home = lazy(() => import('./pages/Home'))
 const Login = lazy(() => import('./pages/Login'))
 const Signup = lazy(() => import('./pages/Signup'))
 const Admin = lazy(() => import('./pages/Admin'))
+const Dashboard = lazy(() => import('./pages/Dashboard'))
+const Orders = lazy(() => import('./pages/Orders'))
 const POS = lazy(() => import('./pages/POS'))
 const Inventory = lazy(() => import('./pages/Inventory'))
 const POSBills = lazy(() => import('./pages/POSBills'))
@@ -26,6 +28,8 @@ function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
         <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
+        <Route path="/admin/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+        <Route path="/admin/orders" element={<ProtectedRoute><Orders /></ProtectedRoute>} />
         <Route path="/admin/pos" element={<ProtectedRoute><POS /></ProtectedRoute>} />
         <Route path="/admin/inventory" element={<ProtectedRoute><Inventory /></ProtectedRoute>} />
         <Route path="/admin/pos/bills" element={<ProtectedRoute><POSBills /></ProtectedRoute>} />
