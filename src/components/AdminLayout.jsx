@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { motion as Motion } from 'framer-motion'
 import Sidebar from './Sidebar'
 import Topbar from './Topbar'
@@ -6,6 +7,7 @@ import Topbar from './Topbar'
 function AdminLayout({ activeKey, onChangeKey, title, query, onQueryChange, onLogout, isLoggingOut = false, children }) {
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
+  const navigate = useNavigate()
 
   const menuItems = useMemo(() => [
     { key: 'dashboard', label: 'Dashboard', icon: <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 12l9-9 9 9" strokeLinecap="round" strokeLinejoin="round" /><path d="M9 21V9h6v12" strokeLinecap="round" strokeLinejoin="round" /></svg> },
@@ -19,9 +21,21 @@ function AdminLayout({ activeKey, onChangeKey, title, query, onQueryChange, onLo
     { key: 'settings', label: 'Settings', icon: <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1-1.51l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H10A1.65 1.65 0 0010 3.09V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51h.01a1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82v.01A1.65 1.65 0 0020.91 10H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" /></svg> },
   ], [])
 
+  const handleMenuChange = (key) => {
+    if (key === 'dashboard') {
+      navigate('/admin/dashboard')
+      return
+    }
+    if (key === 'orders') {
+      navigate('/admin/orders')
+      return
+    }
+    onChangeKey?.(key)
+  }
+
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white">
-      <Sidebar items={menuItems} activeKey={activeKey} onChange={onChangeKey} collapsed={collapsed} onToggle={() => setCollapsed((current) => !current)} mobileOpen={mobileOpen} onCloseMobile={() => setMobileOpen(false)} />
+      <Sidebar items={menuItems} activeKey={activeKey} onChange={handleMenuChange} collapsed={collapsed} onToggle={() => setCollapsed((current) => !current)} mobileOpen={mobileOpen} onCloseMobile={() => setMobileOpen(false)} />
       <div className={`min-h-screen transition-all duration-300 ${collapsed ? 'md:pl-[84px]' : 'md:pl-[248px]'}`}>
         <Topbar title={title} query={query} onQueryChange={onQueryChange} onLogout={onLogout} onOpenMobileSidebar={() => setMobileOpen(true)} isLoggingOut={isLoggingOut} />
         <Motion.main initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }} className="p-4 md:p-6">
