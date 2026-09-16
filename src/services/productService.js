@@ -3,6 +3,7 @@ import { db } from '../firebase'
 import { uploadImage, uploadImages } from './uploadService'
 
 const PRODUCTS_COLLECTION = 'products'
+const productsCollectionRef = collection(db, PRODUCTS_COLLECTION)
 const FALLBACK_CATEGORY = 'Uncategorized'
 const FALLBACK_SIZES = []
 const PRODUCTS_CACHE_TTL_MS = 30 * 1000
