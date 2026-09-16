@@ -2,27 +2,15 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 
 const CART_STORAGE_KEY = 'dhaThreeStreetwearCart'
-
 const CartContext = createContext(null)
 
 function readStoredCart() {
-  if (typeof window === 'undefined') {
-    return []
-  }
-
+  if (typeof window === 'undefined') return []
   try {
     const rawValue = window.localStorage.getItem(CART_STORAGE_KEY)
-
-    if (!rawValue) {
-      return []
-    }
-
+    if (!rawValue) return []
     const parsedValue = JSON.parse(rawValue)
-
-    if (!Array.isArray(parsedValue)) {
-      return []
-    }
-
+    if (!Array.isArray(parsedValue)) return []
     return parsedValue
       .map((item) => ({
         cartItemId: String(item.cartItemId || item.id || '').trim(),
@@ -48,11 +36,7 @@ export function CartProvider({ children }) {
   const [items, setItems] = useState(readStoredCart)
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(items))
-    } catch {
-      // Ignore storage failures so cart actions still work in memory.
-    }
+    try { window.localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(items)) } catch { /* Ignore storage failures. */ }
   }, [items])
 
   const addToCart = (product, options = {}) => {
@@ -61,20 +45,23 @@ export function CartProvider({ children }) {
     const selectedSize = String(options.selectedSize || 'N/A').trim() || 'N/A'
     const quantity = Math.max(1, Number(options.quantity || 1))
     const cartItemId = buildCartItemId(productId, selectedSize)
+    const availableStock = Number(product?.stock)
 
-    if (!productId) {
-      return
-    }
+    if (!productId) return null
+    if (Number.isFinite(availableStock) && availableStock <= 0) return null
 
     setItems((currentItems) => {
       const existingItem = currentItems.find((item) => item.cartItemId === cartItemId)
+      const currentQuantity = existingItem?.quantity || 0
+      const requestedQuantity = currentQuantity + quantity
+      const cappedQuantity = Number.isFinite(availableStock) && availableStock >= 0
+        ? Math.min(requestedQuantity, availableStock)
+        : requestedQuantity
+
+      if (cappedQuantity <= 0) return currentItems
 
       if (existingItem) {
-        return currentItems.map((item) =>
-          item.cartItemId === cartItemId
-            ? { ...item, quantity: item.quantity + quantity }
-            : item,
-        )
+        return currentItems.map((item) => item.cartItemId === cartItemId ? { ...item, quantity: cappedQuantity } : item)
       }
 
       return [
@@ -87,7 +74,7 @@ export function CartProvider({ children }) {
           imageUrl: String(product?.imageUrl || product?.image || product?.images?.[0] || '').trim(),
           category: String(product?.category || '').trim(),
           selectedSize,
-          quantity,
+          quantity: Math.min(quantity, Number.isFinite(availableStock) && availableStock >= 0 ? availableStock : quantity),
         },
       ]
     })
@@ -97,67 +84,27 @@ export function CartProvider({ children }) {
 
   const removeFromCart = (cartItemId) => {
     const normalizedCartItemId = String(cartItemId || '').trim()
-
-    if (!normalizedCartItemId) {
-      return
-    }
-
-    setItems((currentItems) =>
-      currentItems.filter((item) => item.cartItemId !== normalizedCartItemId),
-    )
+    if (!normalizedCartItemId) return
+    setItems((currentItems) => currentItems.filter((item) => item.cartItemId !== normalizedCartItemId))
   }
 
   const updateQuantity = (cartItemId, quantity) => {
     const normalizedCartItemId = String(cartItemId || '').trim()
     const nextQuantity = Math.max(1, Number(quantity || 0))
-
-    if (!normalizedCartItemId) {
-      return
-    }
-
-    setItems((currentItems) =>
-      currentItems.map((item) =>
-        item.cartItemId === normalizedCartItemId ? { ...item, quantity: nextQuantity } : item,
-      ),
-    )
+    if (!normalizedCartItemId) return
+    setItems((currentItems) => currentItems.map((item) => item.cartItemId === normalizedCartItemId ? { ...item, quantity: nextQuantity } : item))
   }
 
-  const clearCart = () => {
-    setItems([])
-  }
-
-  const cartCount = useMemo(
-    () => items.reduce((total, item) => total + item.quantity, 0),
-    [items],
-  )
-
-  const cartTotal = useMemo(
-    () => items.reduce((total, item) => total + item.price * item.quantity, 0),
-    [items],
-  )
-
-  const value = useMemo(
-    () => ({
-      items,
-      cartCount,
-      cartTotal,
-      addToCart,
-      removeFromCart,
-      updateQuantity,
-      clearCart,
-    }),
-    [cartCount, cartTotal, items],
-  )
+  const clearCart = () => setItems([])
+  const cartCount = useMemo(() => items.reduce((total, item) => total + item.quantity, 0), [items])
+  const cartTotal = useMemo(() => items.reduce((total, item) => total + item.price * item.quantity, 0), [items])
+  const value = useMemo(() => ({ items, cartCount, cartTotal, addToCart, removeFromCart, updateQuantity, clearCart }), [cartCount, cartTotal, items])
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>
 }
 
 export function useCart() {
   const context = useContext(CartContext)
-
-  if (!context) {
-    throw new Error('useCart must be used within a CartProvider')
-  }
-
+  if (!context) throw new Error('useCart must be used within a CartProvider')
   return context
 }
