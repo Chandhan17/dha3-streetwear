@@ -46,6 +46,55 @@ function createBillNumber() {
   return `POS-${datePart}-${randomPart}`
 }
 
+app.post('/api/admin/inventory/adjust', attachUserFromToken, isAdmin, async (req, res) => {
+  try {
+    const firestore = getFirestoreInstance()
+    if (!firestore) return res.status(503).json({ success: false, message: 'Server not configured' })
+
+    const productId = String(req.body?.productId || '').trim()
+    const quantity = Number(req.body?.quantity)
+    const reason = String(req.body?.reason || 'Manual inventory adjustment').trim() || 'Manual inventory adjustment'
+
+    if (!productId || !Number.isInteger(quantity) || quantity === 0) {
+      return res.status(400).json({ success: false, message: 'productId and a non-zero integer quantity are required' })
+    }
+
+    const productRef = firestore.collection(PRODUCT_COLLECTION).doc(productId)
+    const transactionRef = firestore.collection(INVENTORY_TRANSACTION_COLLECTION).doc()
+
+    const result = await firestore.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(productRef)
+      if (!snapshot.exists) throw new Error('Product not found')
+
+      const product = snapshot.data() || {}
+      const currentStock = Number(product.stock ?? product.openingStock ?? 0)
+      const nextStock = currentStock + quantity
+      if (!Number.isFinite(currentStock) || nextStock < 0) throw new Error('Stock cannot be negative')
+
+      transaction.update(productRef, { stock: nextStock, updatedAt: FieldValue.serverTimestamp() })
+      transaction.set(transactionRef, {
+        productId,
+        type: quantity > 0 ? 'stock_in' : 'stock_out',
+        quantity,
+        stockBefore: currentStock,
+        stockAfter: nextStock,
+        reason,
+        createdBy: req.user.uid,
+        createdAt: FieldValue.serverTimestamp(),
+      })
+
+      return { productId, stockBefore: currentStock, quantity, stockAfter: nextStock }
+    })
+
+    return res.status(200).json({ success: true, inventory: result })
+  } catch (error) {
+    console.error('Inventory adjustment error:', error)
+    const message = String(error?.message || '')
+    if (message === 'Product not found' || message === 'Stock cannot be negative') return res.status(409).json({ success: false, message })
+    return res.status(500).json({ success: false, message: 'Failed to adjust inventory' })
+  }
+})
+
 app.post('/api/admin/pos/sale', attachUserFromToken, isAdmin, async (req, res) => {
   try {
     const firestore = getFirestoreInstance()
@@ -74,32 +123,18 @@ app.post('/api/admin/pos/sale', attachUserFromToken, isAdmin, async (req, res) =
       snapshots.forEach((snapshot, index) => {
         const item = items[index]
         if (!snapshot.exists) throw new Error(`Product not found: ${item.productId}`)
-
         const product = snapshot.data() || {}
         const currentStock = Number(product.stock ?? product.openingStock ?? 0)
         const unitPrice = asMoney(product.price ?? product.salePrice)
         const purchasePrice = asMoney(product.purchasePrice ?? product.prchPrice ?? product.costPrice)
         const gstPercent = Math.max(0, asMoney(product.gstPercent ?? product.gst ?? 0))
-
         if (!Number.isFinite(currentStock) || currentStock < item.quantity) throw new Error(`Insufficient stock for ${String(product.name || item.productId)}`)
         if (unitPrice <= 0) throw new Error(`Invalid sale price for ${String(product.name || item.productId)}`)
 
         const lineSubtotal = asMoney(unitPrice * item.quantity)
         subtotal = asMoney(subtotal + lineSubtotal)
         costTotal = asMoney(costTotal + purchasePrice * item.quantity)
-
-        saleItems.push({
-          productId: item.productId,
-          name: String(product.name || 'Product').trim() || 'Product',
-          sku: String(product.sku || '').trim(),
-          barcode: String(product.barcode || '').trim(),
-          selectedSize: item.selectedSize,
-          quantity: item.quantity,
-          unitPrice,
-          purchasePrice,
-          gstPercent,
-          lineSubtotal,
-        })
+        saleItems.push({ productId: item.productId, name: String(product.name || 'Product').trim() || 'Product', sku: String(product.sku || '').trim(), barcode: String(product.barcode || '').trim(), selectedSize: item.selectedSize, quantity: item.quantity, unitPrice, purchasePrice, gstPercent, lineSubtotal })
       })
 
       const safeDiscount = Math.min(discount, subtotal)
@@ -117,21 +152,9 @@ app.post('/api/admin/pos/sale', attachUserFromToken, isAdmin, async (req, res) =
         const productRef = productRefs[index]
         const inventoryRef = inventoryRefs[index]
         const currentStock = Number(snapshots[index].data()?.stock ?? snapshots[index].data()?.openingStock ?? 0)
-        const newStock = asMoney(currentStock - item.quantity)
-
+        const newStock = currentStock - item.quantity
         transaction.update(productRef, { stock: newStock, updatedAt: FieldValue.serverTimestamp() })
-        transaction.set(inventoryRef, {
-          productId: item.productId,
-          type: 'sale',
-          quantity: -item.quantity,
-          stockBefore: currentStock,
-          stockAfter: newStock,
-          referenceId: billRef.id,
-          billNo,
-          reason: 'POS sale',
-          createdBy: req.user.uid,
-          createdAt: FieldValue.serverTimestamp(),
-        })
+        transaction.set(inventoryRef, { productId: item.productId, type: 'sale', quantity: -item.quantity, stockBefore: currentStock, stockAfter: newStock, referenceId: billRef.id, billNo, reason: 'POS sale', createdBy: req.user.uid, createdAt: FieldValue.serverTimestamp() })
       })
 
       transaction.set(billRef, {
