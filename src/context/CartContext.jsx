@@ -20,7 +20,7 @@ function readStoredCart() {
         imageUrl: String(item.imageUrl || '').trim(),
         category: String(item.category || '').trim(),
         selectedSize: String(item.selectedSize || 'N/A').trim() || 'N/A',
-        quantity: Math.max(1, Number(item.quantity || 1)),
+        quantity: Math.min(1, Math.max(1, Number(item.quantity || 1))),
       }))
       .filter((item) => Boolean(item.cartItemId) && Boolean(item.productId) && Boolean(item.name))
   } catch {
@@ -43,20 +43,28 @@ export function CartProvider({ children }) {
     const productId = String(product?.id || '').trim()
     const productName = String(product?.name || 'Product').trim() || 'Product'
     const selectedSize = String(options.selectedSize || 'N/A').trim() || 'N/A'
-    const quantity = Math.max(1, Number(options.quantity || 1))
+    const requestedQuantity = Math.max(1, Number(options.quantity || 1))
+    const hasSizes = Array.isArray(product?.sizes) && product.sizes.length > 0
     const cartItemId = buildCartItemId(productId, selectedSize)
     const availableStock = Number(product?.stock)
+    const sizeStockSource = product?.sizeStock && typeof product.sizeStock === 'object' ? product.sizeStock : {}
+    const hasTrackedSize = hasSizes && Object.prototype.hasOwnProperty.call(sizeStockSource, selectedSize)
+    const availableSizeStock = hasTrackedSize ? Number(sizeStockSource[selectedSize]) : (hasSizes ? 1 : Number.POSITIVE_INFINITY)
 
     if (!productId) return null
-    if (Number.isFinite(availableStock) && availableStock <= 0) return null
+    if (hasSizes && selectedSize === 'N/A') return null
+    if ((hasSizes && availableSizeStock <= 0) || (!hasSizes && Number.isFinite(availableStock) && availableStock <= 0)) return null
 
     setItems((currentItems) => {
       const existingItem = currentItems.find((item) => item.cartItemId === cartItemId)
       const currentQuantity = existingItem?.quantity || 0
-      const requestedQuantity = currentQuantity + quantity
-      const cappedQuantity = Number.isFinite(availableStock) && availableStock >= 0
-        ? Math.min(requestedQuantity, availableStock)
-        : requestedQuantity
+      const maxQuantity = hasSizes && Number.isFinite(availableSizeStock)
+        ? availableSizeStock
+        : Number.isFinite(availableStock)
+          ? availableStock
+          : Number.POSITIVE_INFINITY
+      const requestedTotal = currentQuantity + requestedQuantity
+      const cappedQuantity = Math.min(requestedTotal, maxQuantity, hasSizes ? 1 : Number.POSITIVE_INFINITY)
 
       if (cappedQuantity <= 0) return currentItems
 
@@ -74,7 +82,7 @@ export function CartProvider({ children }) {
           imageUrl: String(product?.imageUrl || product?.image || product?.images?.[0] || '').trim(),
           category: String(product?.category || '').trim(),
           selectedSize,
-          quantity: Math.min(quantity, Number.isFinite(availableStock) && availableStock >= 0 ? availableStock : quantity),
+          quantity: Math.min(requestedQuantity, maxQuantity, hasSizes ? 1 : Number.POSITIVE_INFINITY),
         },
       ]
     })
@@ -92,7 +100,7 @@ export function CartProvider({ children }) {
     const normalizedCartItemId = String(cartItemId || '').trim()
     const nextQuantity = Math.max(1, Number(quantity || 0))
     if (!normalizedCartItemId) return
-    setItems((currentItems) => currentItems.map((item) => item.cartItemId === normalizedCartItemId ? { ...item, quantity: nextQuantity } : item))
+    setItems((currentItems) => currentItems.map((item) => item.cartItemId === normalizedCartItemId ? { ...item, quantity: item.selectedSize !== 'N/A' ? 1 : nextQuantity } : item))
   }
 
   const clearCart = () => setItems([])
