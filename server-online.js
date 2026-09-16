@@ -39,10 +39,23 @@ function normalizeDiscountPercent(value) {
 }
 
 function normalizeSizes(value) {
-  if (Array.isArray(value)) return [...new Set(value.map((item) => String(item || '').trim()).filter(Boolean))]
+  const normalizeSizeValue = (item) => {
+    if (typeof item === 'string' || typeof item === 'number') return String(item).trim()
+    if (item && typeof item === 'object') {
+      const candidate = item.size ?? item.value ?? item.label
+      return typeof candidate === 'string' || typeof candidate === 'number' ? String(candidate).trim() : ''
+    }
+    return ''
+  }
+
+  if (Array.isArray(value)) return [...new Set(value.map(normalizeSizeValue).filter(Boolean))]
   if (typeof value === 'string') return [...new Set(value.split(',').map((item) => String(item || '').trim()).filter(Boolean))]
   if (value && typeof value === 'object') return Object.entries(value).filter(([, enabled]) => Boolean(enabled)).map(([size]) => String(size || '').trim()).filter(Boolean)
   return []
+}
+
+function normalizeSelectedSize(value) {
+  return String(value || '').trim()
 }
 
 function getSizeStock(product) {
@@ -55,11 +68,17 @@ function getSizeStock(product) {
 function validateRequestedSize(product, requested) {
   const sizes = normalizeSizes(product?.sizes)
   if (!sizes.length) return
-  if (requested.selectedSize === 'N/A' || !sizes.includes(requested.selectedSize)) throw new Error(`Please select a valid size for ${String(product.name || requested.productId)}`)
+
+  const selectedSize = normalizeSelectedSize(requested?.selectedSize)
+  if (!selectedSize || selectedSize === 'N/A' || !sizes.some((size) => normalizeSelectedSize(size) === selectedSize)) {
+    throw new Error(`Please select a valid size for ${String(product.name || requested.productId)}`)
+  }
+
+  const matchedSize = sizes.find((size) => normalizeSelectedSize(size) === selectedSize) || selectedSize
   const sizeStock = getSizeStock(product)
-  const available = Number(sizeStock[requested.selectedSize] || 0)
-  if (available <= 0) throw new Error(`Size ${requested.selectedSize} is sold out for ${String(product.name || requested.productId)}`)
-  if (requested.quantity > available) throw new Error(`Only 1 unit of size ${requested.selectedSize} is available for ${String(product.name || requested.productId)}`)
+  const available = Number(sizeStock[matchedSize] ?? sizeStock[selectedSize] ?? 0)
+  if (available <= 0) throw new Error(`Size ${selectedSize} is sold out for ${String(product.name || requested.productId)}`)
+  if (requested.quantity > available) throw new Error(`Only 1 unit of size ${selectedSize} is available for ${String(product.name || requested.productId)}`)
 }
 
 async function buildDiscountedPaymentIntent(items, discountPercent) {
@@ -79,7 +98,7 @@ async function buildDiscountedPaymentIntent(items, discountPercent) {
       productId: requested.productId,
       name: String(product.name || 'Product').trim() || 'Product',
       imageUrl: String(product.imageUrl || product.image || '').trim(),
-      selectedSize: requested.selectedSize,
+      selectedSize: normalizeSelectedSize(requested.selectedSize) || 'N/A',
       quantity: requested.quantity,
       unitPrice,
       lineTotal: money(unitPrice * requested.quantity),
@@ -137,8 +156,11 @@ app.post('/api/online/check-stock', async (req, res) => {
       if (!Number.isFinite(stock) || stock <= 0) throw new Error(`Insufficient stock for ${String(product.name || requested.productId)}`)
       if (requested.quantity > stock) throw new Error(`Only ${stock} unit(s) available for ${String(product.name || requested.productId)}`)
       const sizes = normalizeSizes(product.sizes)
-      const sizeAvailable = sizes.length ? Number(getSizeStock(product)[requested.selectedSize] || 0) : null
-      checkedItems.push({ productId: requested.productId, quantity: requested.quantity, selectedSize: requested.selectedSize, stock, sizeAvailable })
+      const sizeStock = sizes.length ? getSizeStock(product) : {}
+      const selectedSize = normalizeSelectedSize(requested.selectedSize) || 'N/A'
+      const matchedSize = sizes.find((size) => normalizeSelectedSize(size) === selectedSize) || selectedSize
+      const sizeAvailable = sizes.length ? Number(sizeStock[matchedSize] ?? sizeStock[selectedSize] ?? 0) : null
+      checkedItems.push({ productId: requested.productId, quantity: requested.quantity, selectedSize, stock, sizeAvailable })
     })
 
     return res.json({ success: true, items: checkedItems })
@@ -187,18 +209,24 @@ app.post('/api/online/complete-order', async (req, res) => {
         const purchasePrice = money(product.purchasePrice ?? product.prchPrice ?? product.costPrice)
         const sizes = normalizeSizes(product.sizes)
         const sizeStock = sizes.length ? getSizeStock(product) : {}
+        const selectedSize = normalizeSelectedSize(requested.selectedSize) || 'N/A'
         if (sizes.length) {
-          if (requested.selectedSize === 'N/A' || !sizes.includes(String(requested.selectedSize || '').trim())) throw new Error(`Please select a valid size for ${String(product.name || requested.productId)}`)
-          if (Number(sizeStock[requested.selectedSize] || 0) <= 0) throw new Error(`Size ${requested.selectedSize} is sold out for ${String(product.name || requested.productId)}`)
+          const matchedSize = sizes.find((size) => normalizeSelectedSize(size) === selectedSize)
+          if (!matchedSize) throw new Error(`Please select a valid size for ${String(product.name || requested.productId)}`)
+          if (Number(sizeStock[matchedSize] ?? sizeStock[selectedSize] ?? 0) <= 0) throw new Error(`Size ${selectedSize} is sold out for ${String(product.name || requested.productId)}`)
         }
         if (!Number.isFinite(currentStock) || currentStock < quantity) throw new Error(`Insufficient stock for ${String(product.name || requested.productId)}`)
         const unitPrice = money(product.price ?? requested.unitPrice)
         const nextStock = currentStock - quantity
-        const nextSizeStock = sizes.length ? { ...sizeStock, [requested.selectedSize]: 0 } : null
-        products.push({ productId: String(requested.productId), name: String(product.name || requested.name || 'Product').trim() || 'Product', imageUrl: String(product.imageUrl || product.image || requested.imageUrl || '').trim(), selectedSize: String(requested.selectedSize || 'N/A').trim() || 'N/A', quantity, unitPrice, purchasePrice, lineTotal: money(unitPrice * quantity) })
+        let nextSizeStock = null
+        if (sizes.length) {
+          const matchedSize = sizes.find((size) => normalizeSelectedSize(size) === selectedSize) || selectedSize
+          nextSizeStock = { ...sizeStock, [matchedSize]: 0 }
+        }
+        products.push({ productId: String(requested.productId), name: String(product.name || requested.name || 'Product').trim() || 'Product', imageUrl: String(product.imageUrl || product.image || requested.imageUrl || '').trim(), selectedSize, quantity, unitPrice, purchasePrice, lineTotal: money(unitPrice * quantity) })
         totalCost += purchasePrice * quantity
         transaction.update(productRefs[index], sizes.length ? { stock: nextStock, sizeStock: nextSizeStock, updatedAt: FieldValue.serverTimestamp() } : { stock: nextStock, updatedAt: FieldValue.serverTimestamp() })
-        transaction.set(inventoryRefs[index], { productId: String(requested.productId), type: 'sale', quantity: -quantity, stockBefore: currentStock, stockAfter: nextStock, selectedSize: String(requested.selectedSize || 'N/A').trim() || 'N/A', referenceId: orderRef.id, billNo: paymentOrderId, reason: 'Online Razorpay sale', paymentOrderId, createdAt: FieldValue.serverTimestamp() })
+        transaction.set(inventoryRefs[index], { productId: String(requested.productId), type: 'sale', quantity: -quantity, stockBefore: currentStock, stockAfter: nextStock, selectedSize, referenceId: orderRef.id, billNo: paymentOrderId, reason: 'Online Razorpay sale', paymentOrderId, createdAt: FieldValue.serverTimestamp() })
       })
 
       const totalAmount = money(intent.totalAmount)
