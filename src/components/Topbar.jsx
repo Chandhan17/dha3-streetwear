@@ -1,12 +1,9 @@
 import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import Button from './Button'
-import Input from './Input'
 
 function Topbar({
   title,
-  query,
-  onQueryChange,
   onLogout,
   onOpenMobileSidebar,
   isLoggingOut = false,
@@ -33,17 +30,7 @@ function Topbar({
           </div>
         </div>
 
-        <div className="flex flex-1 items-center justify-end gap-2 md:gap-3">
-          <div className="hidden w-full max-w-sm md:block">
-            <Input
-              aria-label="Search"
-              placeholder="Search products, orders..."
-              value={query}
-              onChange={(event) => onQueryChange(event.target.value)}
-              inputClassName="h-10 rounded-2xl"
-            />
-          </div>
-
+        <div className="flex items-center justify-end gap-2 md:gap-3">
           <div className="grid h-10 w-10 place-items-center rounded-2xl border border-[#c19a6b]/40 bg-[#c19a6b]/15 text-xs font-semibold tracking-[0.12em] text-[#f0ddc4]">
             {initials}
           </div>
