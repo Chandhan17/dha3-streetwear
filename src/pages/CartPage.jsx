@@ -34,6 +34,57 @@ function buildFullAddress({ doorNo, street, city, pincode, state }) {
   return [doorNo, street, city, pincode, state].map((value) => String(value || '').trim()).filter(Boolean).join(', ')
 }
 
+function buildPaidWhatsAppLink(items, customerDetails, paymentResponse, total) {
+  const whatsappNumber = String(clientConfig.whatsapp || clientConfig.whatsappNumber || '').replace(/\D/g, '')
+  if (!whatsappNumber) return ''
+  const fullAddress = buildFullAddress(customerDetails)
+  const itemLines = items.map((item) => {
+    const size = item.selectedSize && item.selectedSize !== 'N/A' ? `, Size ${item.selectedSize}` : ''
+    return `${item.name}${size} x${item.quantity} - ₹${(Number(item.price || 0) * Number(item.quantity || 0)).toLocaleString('en-IN')}`
+  }).join('\n')
+  const message = [
+    '✅ PAID ONLINE ORDER - DHA THREE',
+    '',
+    'Order Items:',
+    itemLines,
+    '',
+    `Total Paid: ₹${Number(total || 0).toLocaleString('en-IN')}`,
+    'Payment Status: PAID',
+    `Payment ID: ${paymentResponse?.paymentId || 'N/A'}`,
+    `Razorpay Order ID: ${paymentResponse?.orderId || 'N/A'}`,
+    `Order ID: ${paymentResponse?.orderDocumentId || 'N/A'}`,
+    '',
+    'Customer Details:',
+    `Name: ${customerDetails.name.trim()}`,
+    `Phone: ${customerDetails.phone.trim()}`,
+    `Door No: ${customerDetails.doorNo.trim() || 'N/A'}`,
+    `Street: ${customerDetails.street.trim() || 'N/A'}`,
+    `City: ${customerDetails.city.trim() || 'N/A'}`,
+    `Pincode: ${customerDetails.pincode.trim() || 'N/A'}`,
+    `State: ${customerDetails.state.trim() || 'N/A'}`,
+    `Address: ${fullAddress || 'N/A'}`,
+    `Notes: ${customerDetails.notes.trim() || 'N/A'}`,
+  ].join('\n')
+  return `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`
+}
+
+function openPaidWhatsApp(link) {
+  if (!link) return false
+  try {
+    const popup = window.open(link, '_blank', 'noopener,noreferrer')
+    if (popup) {
+      popup.focus?.()
+      return true
+    }
+  } catch { /* Fall through to same-tab navigation. */ }
+  try {
+    window.location.assign(link)
+    return true
+  } catch {
+    return false
+  }
+}
+
 function CartPage() {
   const { items, cartCount, cartTotal, updateQuantity, removeFromCart, clearCart } = useCart()
   const { errorMessage, showError, clearError } = useBrandedNotification()
@@ -61,14 +112,12 @@ function CartPage() {
     const products = await fetchProducts({ forceRefresh: true })
     const productMap = new Map(products.map((product) => [String(product.id), product]))
     const unavailable = []
-
     items.forEach((item) => {
       const product = productMap.get(String(item.productId))
       const stock = Number(product?.stock ?? 0)
       if (!product || !Number.isFinite(stock) || stock <= 0) unavailable.push(`${item.name} is out of stock`)
       else if (item.quantity > stock) unavailable.push(`Only ${stock} unit(s) of ${item.name} available`)
     })
-
     if (unavailable.length > 0) {
       showError(unavailable[0])
       return false
@@ -77,22 +126,17 @@ function CartPage() {
   }
 
   const handleRazorpayCheckout = async () => {
-    if (!hasItems) {
-      showError('Your cart is empty')
-      return
-    }
+    if (!hasItems) { showError('Your cart is empty'); return }
     if (!validateDetails()) return
 
     setIsSubmitting(true)
     clearError()
-
     try {
       const stockIsValid = await validateLiveStock()
       if (!stockIsValid) return
 
       const fullAddress = buildFullAddress(customerDetails)
       persistCustomerDetails(customerDetails)
-
       await initiatePayment({
         items: items.map((item) => ({ productId: item.productId, quantity: item.quantity, selectedSize: item.selectedSize })),
         userId: auth.currentUser?.uid || 'guest',
@@ -106,8 +150,14 @@ function CartPage() {
         customerPhone: customerDetails.phone.trim(),
         customerEmail: '',
         productImage: items[0]?.imageUrl || '/dha-logo.png',
-        onSuccess: async () => {
+        onSuccess: async (paymentResponse) => {
           clearCart()
+          const whatsappLink = buildPaidWhatsAppLink(items, customerDetails, paymentResponse, cartTotal)
+          if (!openPaidWhatsApp(whatsappLink)) {
+            showError('Payment successful. WhatsApp could not be opened automatically.')
+            return
+          }
+          showError('Payment successful. Paid order forwarded to WhatsApp.', 'success')
         },
         onFailure: (error) => showError(error.message || 'Payment failed. Please try again'),
       })
@@ -126,7 +176,6 @@ function CartPage() {
         <section className="street-panel overflow-hidden p-5 md:p-7">
           <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.22em] text-white/50">Curated Cart</p><h1 className="mt-2 font-display text-3xl md:text-5xl">Your Cart</h1></div><p className="text-sm text-white/65">{cartCount} item{cartCount === 1 ? '' : 's'} in your bag</p></div>
         </section>
-
         <div className="mt-8 grid gap-6 lg:grid-cols-[1.35fr_0.85fr]">
           <section className="space-y-4">
             {!hasItems ? <div className="street-panel p-6 text-center text-white/65">Your cart is empty. Add pieces from the collection to build your order.</div> : items.map((item) => (
@@ -139,13 +188,12 @@ function CartPage() {
               </article>
             ))}
           </section>
-
           <aside className="space-y-4">
             <section className="street-panel p-5 md:p-6"><h2 className="font-display text-2xl">Checkout</h2><div className="mt-4 space-y-3">{['name', 'phone', 'doorNo', 'street', 'city', 'pincode', 'state'].map((field) => <input key={field} name={field} value={customerDetails[field]} onChange={handleInputChange} placeholder={field === 'doorNo' ? 'Door No' : field.charAt(0).toUpperCase() + field.slice(1)} disabled={isSubmitting} className="w-full rounded-2xl border border-white/10 bg-black/60 px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-white/30" />)}<textarea name="notes" value={customerDetails.notes} onChange={handleInputChange} rows={3} placeholder="Notes (optional)" disabled={isSubmitting} className="w-full rounded-2xl border border-white/10 bg-black/60 px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-white/30" /></div></section>
             <section className="street-panel p-5 md:p-6">
               <div className="flex items-center justify-between text-sm text-white/65"><span>Subtotal</span><span>₹{formattedTotal}</span></div>
               <div className="mt-2 flex items-center justify-between text-base font-semibold text-white"><span>Total</span><span>₹{formattedTotal}</span></div>
-              <p className="mt-3 text-xs text-white/45">Online orders require payment through Razorpay. Paid orders are then forwarded to WhatsApp for store confirmation.</p>
+              <p className="mt-3 text-xs text-white/45">Online orders require full payment through Razorpay. Only paid orders are forwarded to WhatsApp for the store.</p>
               <button type="button" onClick={handleRazorpayCheckout} disabled={!hasItems || isSubmitting} className="mt-5 w-full rounded-full border border-white/20 bg-white px-4 py-3 text-sm font-semibold uppercase tracking-[0.14em] text-black transition hover:-translate-y-0.5 hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50">{isSubmitting ? 'Processing Payment...' : 'Pay 100% with Razorpay'}</button>
               <button type="button" onClick={clearCart} disabled={!hasItems || isSubmitting} className="mt-3 w-full rounded-full border border-white/15 px-4 py-3 text-sm font-semibold uppercase tracking-[0.14em] text-white/70 transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50">Clear Cart</button>
             </section>
