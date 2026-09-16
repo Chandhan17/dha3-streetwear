@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Footer from '../components/Footer'
 import Navbar from '../components/Navbar'
 import BrandedNotification from '../components/BrandedNotification'
@@ -10,6 +10,7 @@ import { initiatePayment } from '../services/paymentService'
 import { fetchProducts } from '../services/productService'
 
 const CUSTOMER_DETAILS_KEY = 'dhaThreeStreetwearCustomerDetails'
+const BUY_NOW_CHECKOUT_KEY = 'dhaThreeStreetwearBuyNowCheckout'
 const initialFormState = { name: '', phone: '', doorNo: '', street: '', city: '', pincode: '', state: '', notes: '' }
 
 function readStoredCustomerDetails() {
@@ -84,7 +85,6 @@ function openWhatsAppOrderMessage({ customerDetails, items, orderId, paymentId, 
 
   const message = buildWhatsAppMessage({ customerDetails, items, orderId, paymentId, amount })
   const whatsappUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`
-
   window.location.href = whatsappUrl
 }
 
@@ -93,6 +93,18 @@ function CartPage() {
   const { errorMessage, showError, clearError } = useBrandedNotification()
   const [customerDetails, setCustomerDetails] = useState(() => readStoredCustomerDetails())
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  useEffect(() => {
+    let shouldClearOnExit = false
+    try { shouldClearOnExit = window.sessionStorage.getItem(BUY_NOW_CHECKOUT_KEY) === '1' } catch { /* Ignore storage failures. */ }
+    if (shouldClearOnExit) {
+      return () => {
+        try { window.sessionStorage.removeItem(BUY_NOW_CHECKOUT_KEY) } catch { /* Ignore storage failures. */ }
+        clearCart()
+      }
+    }
+    return undefined
+  }, [clearCart])
 
   const formattedTotal = useMemo(() => new Intl.NumberFormat('en-IN').format(money(cartTotal)), [cartTotal])
   const hasItems = items.length > 0
@@ -119,8 +131,15 @@ function CartPage() {
     items.forEach((item) => {
       const product = productMap.get(String(item.productId))
       const stock = Number(product?.stock ?? 0)
-      if (!product || !Number.isFinite(stock) || stock <= 0) unavailable.push(`${item.name} is out of stock`)
-      else if (item.quantity > stock) unavailable.push(`Only ${stock} unit(s) of ${item.name} available`)
+      const hasSizes = Array.isArray(product?.sizes) && product.sizes.length > 0
+      const sizeStock = product?.sizeStock && typeof product.sizeStock === 'object' ? product.sizeStock : {}
+      const selectedSize = String(item.selectedSize || 'N/A').trim() || 'N/A'
+      const sizeAvailable = hasSizes ? Number(sizeStock[selectedSize] ?? 0) : null
+      if (!product || (hasSizes ? !Number.isFinite(sizeAvailable) || sizeAvailable <= 0 : !Number.isFinite(stock) || stock <= 0)) {
+        unavailable.push(hasSizes ? `Size ${selectedSize} of ${item.name} is out of stock` : `${item.name} is out of stock`)
+      } else if (item.quantity > (hasSizes ? sizeAvailable : stock)) {
+        unavailable.push(hasSizes ? `Only 1 unit of size ${selectedSize} is available for ${item.name}` : `Only ${stock} unit(s) of ${item.name} available`)
+      }
     })
 
     if (unavailable.length > 0) {
@@ -163,6 +182,7 @@ function CartPage() {
         onSuccess: async ({ orderId, paymentId, amount }) => {
           const purchasedItems = [...items]
           const purchasedCustomerDetails = { ...customerDetails }
+          try { window.sessionStorage.removeItem(BUY_NOW_CHECKOUT_KEY) } catch { /* Ignore storage failures. */ }
           clearCart()
 
           try {
@@ -194,7 +214,6 @@ function CartPage() {
         <section className="street-panel overflow-hidden p-5 md:p-7">
           <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.22em] text-white/50">Curated Cart</p><h1 className="mt-2 font-display text-3xl md:text-5xl">Your Cart</h1></div><p className="text-sm text-white/65">{cartCount} item{cartCount === 1 ? '' : 's'} in your bag</p></div>
         </section>
-
         <div className="mt-8 grid gap-6 lg:grid-cols-[1.35fr_0.85fr]">
           <section className="space-y-4">
             {!hasItems ? <div className="street-panel p-6 text-center text-white/65">Your cart is empty. Add pieces from the collection to build your order.</div> : items.map((item) => (
@@ -207,7 +226,6 @@ function CartPage() {
               </article>
             ))}
           </section>
-
           <aside className="space-y-4">
             <section className="street-panel p-5 md:p-6"><h2 className="font-display text-2xl">Checkout</h2><div className="mt-4 space-y-3">{['name', 'phone', 'doorNo', 'street', 'city', 'pincode', 'state'].map((field) => <input key={field} name={field} value={customerDetails[field]} onChange={handleInputChange} placeholder={field === 'doorNo' ? 'Door No' : field.charAt(0).toUpperCase() + field.slice(1)} disabled={isSubmitting} className="w-full rounded-2xl border border-white/10 bg-black/60 px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-white/30" />)}<textarea name="notes" value={customerDetails.notes} onChange={handleInputChange} rows={3} placeholder="Notes (optional)" disabled={isSubmitting} className="w-full rounded-2xl border border-white/10 bg-black/60 px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-white/30" /></div></section>
             <section className="street-panel p-5 md:p-6">
