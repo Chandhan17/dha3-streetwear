@@ -13,6 +13,7 @@ const POS = lazy(() => import('./pages/POS'))
 const Inventory = lazy(() => import('./pages/Inventory'))
 const POSBills = lazy(() => import('./pages/POSBills'))
 const ProductImport = lazy(() => import('./pages/ProductImport'))
+const Reports = lazy(() => import('./pages/Reports'))
 const CategoryPage = lazy(() => import('./pages/CategoryPage'))
 const ProductDetails = lazy(() => import('./pages/ProductDetails'))
 const CartPage = lazy(() => import('./pages/CartPage'))
@@ -34,6 +35,7 @@ function App() {
         <Route path="/admin/inventory" element={<ProtectedRoute><Inventory /></ProtectedRoute>} />
         <Route path="/admin/pos/bills" element={<ProtectedRoute><POSBills /></ProtectedRoute>} />
         <Route path="/admin/products/import" element={<ProtectedRoute><ProductImport /></ProtectedRoute>} />
+        <Route path="/admin/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
       </Routes>
     </Suspense>
   )
