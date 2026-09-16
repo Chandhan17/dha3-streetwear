@@ -10,6 +10,8 @@ import { useBrandedNotification } from '../hooks/useBrandedNotification'
 import { fetchProductById } from '../services/productService'
 import { shareProductLink } from '../services/shareService'
 
+const BUY_NOW_CHECKOUT_KEY = 'dhaThreeStreetwearBuyNowCheckout'
+
 function normalizeSizes(sizes) {
   const normalizeSizeValue = (value) => {
     if (typeof value === 'string' || typeof value === 'number') return String(value).trim()
@@ -141,9 +143,9 @@ function ProductDetails() {
       return
     }
     if (!ensureCanBuy()) return
-    // Buy Now is a dedicated checkout flow, so replace any previous cart contents.
     clearCart()
     addToCart(product, { selectedSize: hasSizes ? selectedSize : 'N/A', quantity: 1 })
+    try { window.sessionStorage.setItem(BUY_NOW_CHECKOUT_KEY, '1') } catch { /* Ignore storage failures. */ }
     navigate('/cart')
   }
 
