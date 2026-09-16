@@ -230,6 +230,7 @@ app.post('/api/online/complete-order', async (req, res) => {
       const snapshots = await Promise.all(productRefs.map((ref) => transaction.get(ref)))
       const products = []
       let totalCost = 0
+      const pendingProductUpdates = new Map()
 
       snapshots.forEach((snapshot, index) => {
         const requested = sourceItems[index]
@@ -242,6 +243,7 @@ app.post('/api/online/complete-order', async (req, res) => {
         const sizeStock = getSizeStock(product)
         const selectedSize = normalizeSelectedSize(requested.selectedSize) || 'N/A'
         let canonicalSize = selectedSize
+
         if (sizes.length) {
           const matchedSize = findMatchedSize(sizes, selectedSize)
           if (!matchedSize) throw new Error(`Please select a valid size for ${String(product.name || requested.productId)}`)
@@ -249,19 +251,33 @@ app.post('/api/online/complete-order', async (req, res) => {
           if (Number(stockKey === undefined ? 0 : sizeStock[stockKey]) <= 0) throw new Error(`Size ${selectedSize} is sold out for ${String(product.name || requested.productId)}`)
           canonicalSize = matchedSize
         }
+
         if (!Number.isFinite(currentStock) || currentStock < quantity) throw new Error(`Insufficient stock for ${String(product.name || requested.productId)}`)
+
         const unitPrice = money(product.price ?? requested.unitPrice)
-        const nextStock = currentStock - quantity
-        let nextSizeStock = null
+        const existingUpdate = pendingProductUpdates.get(String(requested.productId)) || { nextStock: currentStock, sizeStock: sizes.length ? { ...sizeStock } : null }
+        const nextStock = existingUpdate.nextStock - quantity
+
         if (sizes.length) {
           const matchedSize = findMatchedSize(sizes, selectedSize) || selectedSize
-          const existingKey = Object.keys(sizeStock).find((key) => sameSize(key, matchedSize))
-          nextSizeStock = { ...sizeStock, [existingKey || matchedSize]: 0 }
+          const existingKey = Object.keys(existingUpdate.sizeStock || {}).find((key) => sameSize(key, matchedSize))
+          const targetKey = existingKey || matchedSize
+          if (Number(existingUpdate.sizeStock?.[targetKey]) <= 0) throw new Error(`Size ${selectedSize} is sold out for ${String(product.name || requested.productId)}`)
+          existingUpdate.sizeStock[targetKey] = 0
         }
+
+        existingUpdate.nextStock = nextStock
+        pendingProductUpdates.set(String(requested.productId), existingUpdate)
+
         products.push({ productId: String(requested.productId), name: String(product.name || requested.name || 'Product').trim() || 'Product', imageUrl: String(product.imageUrl || product.image || requested.imageUrl || '').trim(), selectedSize: canonicalSize, quantity, unitPrice, purchasePrice, lineTotal: money(unitPrice * quantity) })
         totalCost += purchasePrice * quantity
-        transaction.update(productRefs[index], sizes.length ? { stock: nextStock, sizeStock: nextSizeStock, updatedAt: FieldValue.serverTimestamp() } : { stock: nextStock, updatedAt: FieldValue.serverTimestamp() })
+
         transaction.set(inventoryRefs[index], { productId: String(requested.productId), type: 'sale', quantity: -quantity, stockBefore: currentStock, stockAfter: nextStock, selectedSize: canonicalSize, referenceId: orderRef.id, billNo: paymentOrderId, reason: 'Online Razorpay sale', paymentOrderId, createdAt: FieldValue.serverTimestamp() })
+      })
+
+      pendingProductUpdates.forEach((update, productId) => {
+        const productRef = firestore.collection(PRODUCT_COLLECTION).doc(productId)
+        transaction.update(productRef, update.sizeStock ? { stock: update.nextStock, sizeStock: update.sizeStock, updatedAt: FieldValue.serverTimestamp() } : { stock: update.nextStock, updatedAt: FieldValue.serverTimestamp() })
       })
 
       const totalAmount = money(intent.totalAmount)
