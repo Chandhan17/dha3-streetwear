@@ -142,6 +142,7 @@ const paymentRateLimit = rateLimit({
     success: false,
     message: 'Too many payment requests. Please try again shortly.',
   },
+  
 })
 
 app.use(globalRateLimit)
@@ -727,6 +728,7 @@ app.use((err, req, res, next) => {
 export {
   app,
   attachUserFromToken,
+  getRuntimeDependencies,
   isAdmin,
   isSignatureValid,
   normalizeOrderItems,
