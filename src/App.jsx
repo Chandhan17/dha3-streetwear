@@ -9,6 +9,7 @@ const Signup = lazy(() => import('./pages/Signup'))
 const Admin = lazy(() => import('./pages/Admin'))
 const POS = lazy(() => import('./pages/POS'))
 const Inventory = lazy(() => import('./pages/Inventory'))
+const POSBills = lazy(() => import('./pages/POSBills'))
 const CategoryPage = lazy(() => import('./pages/CategoryPage'))
 const ProductDetails = lazy(() => import('./pages/ProductDetails'))
 const CartPage = lazy(() => import('./pages/CartPage'))
@@ -26,6 +27,7 @@ function App() {
         <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
         <Route path="/admin/pos" element={<ProtectedRoute><POS /></ProtectedRoute>} />
         <Route path="/admin/inventory" element={<ProtectedRoute><Inventory /></ProtectedRoute>} />
+        <Route path="/admin/pos/bills" element={<ProtectedRoute><POSBills /></ProtectedRoute>} />
       </Routes>
     </Suspense>
   )
