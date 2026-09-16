@@ -19,10 +19,22 @@ function AdminLayout({ activeKey, onChangeKey, title, query, onQueryChange, onLo
     { key: 'analytics', label: 'Reports & Analytics', icon: <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 19h16" strokeLinecap="round" strokeLinejoin="round" /><path d="M6 17l4-6 4 3 4-8" strokeLinecap="round" strokeLinejoin="round" /></svg> },
   ], [])
 
+  const routeMap = {
+    dashboard: '/admin/dashboard',
+    pos: '/admin/pos',
+    posBills: '/admin/pos/bills',
+    inventory: '/admin/inventory',
+    products: '/admin/products',
+    orders: '/admin/orders',
+    analytics: '/admin/reports',
+  }
+
   const handleMenuChange = (key) => {
-    if (key === 'dashboard') { navigate('/admin/dashboard'); return }
-    if (key === 'orders') { navigate('/admin/orders'); return }
-    if (key === 'analytics') { navigate('/admin/reports'); return }
+    const destination = routeMap[key]
+    if (destination) {
+      navigate(destination)
+      return
+    }
     onChangeKey?.(key)
   }
 
