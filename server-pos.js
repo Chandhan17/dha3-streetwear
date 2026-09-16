@@ -193,13 +193,37 @@ app.get('/api/admin/pos/bills', attachUserFromToken, isAdmin, async (req, res) =
   try {
     const firestore = getFirestoreInstance()
     if (!firestore) return res.status(503).json({ success: false, message: 'Server not configured' })
-    const snapshot = await firestore.collection(POS_BILL_COLLECTION).orderBy('createdAt', 'desc').limit(200).get()
+
+    const fromMs = Number(req.query?.fromMs)
+    const toMs = Number(req.query?.toMs)
+    const hasFrom = Number.isFinite(fromMs)
+    const hasTo = Number.isFinite(toMs)
+
+    if ((hasFrom && !hasTo) || (!hasFrom && hasTo)) {
+      return res.status(400).json({ success: false, message: 'Both fromMs and toMs are required for date filtering' })
+    }
+
+    if (hasFrom && hasTo && fromMs > toMs) {
+      return res.status(400).json({ success: false, message: 'fromMs cannot be greater than toMs' })
+    }
+
+    let query = firestore.collection(POS_BILL_COLLECTION)
+    if (hasFrom && hasTo) {
+      query = query
+        .where('createdAt', '>=', new Date(fromMs))
+        .where('createdAt', '<=', new Date(toMs))
+        .orderBy('createdAt', 'desc')
+    } else {
+      query = query.orderBy('createdAt', 'desc').limit(200)
+    }
+
+    const snapshot = await query.get()
     const bills = snapshot.docs.map((doc) => {
       const data = doc.data() || {}
       const createdAt = data.createdAt?.toDate?.()?.toISOString?.() || null
       return { id: doc.id, ...data, createdAt }
     })
-    return res.json({ success: true, bills })
+    return res.json({ success: true, bills, filtered: hasFrom && hasTo, count: bills.length })
   } catch (error) {
     console.error('POS bills fetch error:', error)
     return res.status(500).json({ success: false, message: 'Failed to fetch POS bills' })
