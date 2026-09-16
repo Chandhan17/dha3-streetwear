@@ -19,6 +19,21 @@ function normalizeSizes(sizes) {
   return []
 }
 
+function isWithinNewArrivalWindow(createdAt) {
+  if (!createdAt) return false
+  let createdDate
+  try {
+    if (typeof createdAt?.toDate === 'function') createdDate = createdAt.toDate()
+    else if (typeof createdAt === 'object' && Number.isFinite(Number(createdAt?.seconds))) createdDate = new Date(Number(createdAt.seconds) * 1000)
+    else createdDate = new Date(createdAt)
+  } catch {
+    return false
+  }
+  if (!(createdDate instanceof Date) || Number.isNaN(createdDate.getTime())) return false
+  const ageMs = Date.now() - createdDate.getTime()
+  return ageMs >= 0 && ageMs < 7 * 24 * 60 * 60 * 1000
+}
+
 function ProductCard({ product, showNewTag = false, discountLabel = '', onBuyNowClick, onError }) {
   const navigate = useNavigate()
   const { addToCart } = useCart()
@@ -39,6 +54,7 @@ function ProductCard({ product, showNewTag = false, discountLabel = '', onBuyNow
   const sizeOptions = normalizeSizes(product?.sizes)
   const hasSizes = sizeOptions.length > 0
   const sizeStock = product?.sizeStock && typeof product.sizeStock === 'object' ? product.sizeStock : {}
+  const isNewArrival = isWithinNewArrivalWindow(product?.createdAt)
 
   const imageList = useMemo(() => {
     if (Array.isArray(product?.images) && product.images.length > 0) return product.images.map((image) => String(image || '').trim()).filter(Boolean)
@@ -117,7 +133,7 @@ function ProductCard({ product, showNewTag = false, discountLabel = '', onBuyNow
     <Motion.article role="button" tabIndex={0} onClick={openProductDetails} onKeyDown={handleCardKeyDown} whileHover={{ y: -6, scale: 1.015 }} transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }} className="group surface-elevated animate-rise w-full max-w-[360px] cursor-pointer overflow-hidden border border-white/15 bg-[#0a0a0a] text-white transition duration-500">
       <div className="relative aspect-[3/4] overflow-hidden bg-black">
         <div className="absolute left-3 top-3 z-10 flex gap-2">
-          {showNewTag && <span className="border border-white/20 bg-black/70 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.2em] text-white">New Arrival</span>}
+          {isNewArrival && <span className="border border-white/20 bg-black/70 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.2em] text-white">New Arrival</span>}
           {discountLabel && <span className="border border-white/20 bg-white px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.2em] text-black">{discountLabel}</span>}
           {isOutOfStock && <span className="border border-red-300/30 bg-red-500/80 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.2em] text-white">Out of Stock</span>}
         </div>
