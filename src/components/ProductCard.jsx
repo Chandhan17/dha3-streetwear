@@ -38,6 +38,7 @@ function ProductCard({ product, showNewTag = false, discountLabel = '', onBuyNow
   const isOutOfStock = Number.isFinite(stock) && stock <= 0
   const sizeOptions = normalizeSizes(product?.sizes)
   const hasSizes = sizeOptions.length > 0
+  const sizeStock = product?.sizeStock && typeof product.sizeStock === 'object' ? product.sizeStock : {}
 
   const imageList = useMemo(() => {
     if (Array.isArray(product?.images) && product.images.length > 0) return product.images.map((image) => String(image || '').trim()).filter(Boolean)
@@ -71,6 +72,10 @@ function ProductCard({ product, showNewTag = false, discountLabel = '', onBuyNow
       setShowSizeError(true)
       triggerSizeShake()
       onError?.('Please select a size')
+      return false
+    }
+    if (hasSizes && selectedSize && Object.prototype.hasOwnProperty.call(sizeStock, selectedSize) && Number(sizeStock[selectedSize]) <= 0) {
+      onError?.(`Size ${selectedSize} is sold out`)
       return false
     }
     return true
@@ -133,7 +138,7 @@ function ProductCard({ product, showNewTag = false, discountLabel = '', onBuyNow
         <h3 className="line-clamp-2 min-h-[2.8rem] text-sm font-semibold uppercase tracking-[0.04em] text-white md:text-base">{productName}</h3>
         <p className="font-display text-2xl leading-none text-white md:text-[1.9rem]">₹{formattedPrice}</p>
 
-        {hasSizes && !isOutOfStock && <div className="space-y-2"><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/55">Available Sizes</p><div className={`flex flex-wrap gap-1.5 ${showSizeError && isSizeShakeActive ? 'size-shake' : ''}`}>{sizeOptions.map((size) => { const isActive = selectedSize === size; return <button key={`${productId || productName}-${size}`} type="button" onClick={(event) => { event.stopPropagation(); setSelectedSize(size); setShowSizeError(false) }} className={`border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition ${isActive ? 'border-white bg-white text-black' : showSizeError ? 'border-red-500 bg-red-500/10 text-red-200 hover:border-red-400' : 'border-white/20 bg-black text-white/80 hover:border-white/45'}`}>{size}</button> })}</div>{showSizeError && <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-red-300">Select a size to continue</p>}</div>}
+        {hasSizes && !isOutOfStock && <div className="space-y-2"><div className="flex items-center justify-between gap-2"><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/55">Available Sizes</p><p className="text-[10px] text-white/40">1 each</p></div><div className={`flex flex-wrap gap-1.5 ${showSizeError && isSizeShakeActive ? 'size-shake' : ''}`}>{sizeOptions.map((size) => { const soldOut = Object.prototype.hasOwnProperty.call(sizeStock, size) && Number(sizeStock[size]) <= 0; const isActive = selectedSize === size; return <button key={`${productId || productName}-${size}`} type="button" disabled={soldOut} onClick={(event) => { event.stopPropagation(); if (soldOut) return; setSelectedSize(size); setShowSizeError(false) }} className={`border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition ${soldOut ? 'cursor-not-allowed border-black/10 bg-black/10 text-black/25 line-through opacity-40' : isActive ? 'border-white bg-white text-black' : showSizeError ? 'border-red-500 bg-red-500/10 text-red-200 hover:border-red-400' : 'border-white/20 bg-black text-white/80 hover:border-white/45'}`}>{size}</button> })}</div>{showSizeError && <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-red-300">Select a size to continue</p>}</div>}
         {isOutOfStock && <p className="text-xs font-semibold uppercase tracking-[0.16em] text-red-300">Currently unavailable</p>}
 
         <div className="grid gap-1.5 sm:grid-cols-2">
