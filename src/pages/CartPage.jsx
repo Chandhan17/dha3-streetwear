@@ -34,6 +34,39 @@ function buildFullAddress({ doorNo, street, city, pincode, state }) {
   return [doorNo, street, city, pincode, state].map((value) => String(value || '').trim()).filter(Boolean).join(', ')
 }
 
+function buildWhatsAppMessage({ customerDetails, items, orderId, amount }) {
+  const productLines = items.map((item, index) => {
+    const size = item.selectedSize && item.selectedSize !== 'N/A' ? `, Size ${item.selectedSize}` : ''
+    return `${index + 1}. ${item.name}${size} x ${item.quantity} - ₹${money(Number(item.price || 0) * Number(item.quantity || 0)).toLocaleString('en-IN')}`
+  })
+
+  const address = buildFullAddress(customerDetails)
+  return [
+    `Hello ${clientConfig.shopName}, I have completed an online payment and placed an order.`,
+    '',
+    `Order ID: ${orderId || 'N/A'}`,
+    `Customer: ${customerDetails.name.trim()}`,
+    `Phone: ${customerDetails.phone.trim()}`,
+    address ? `Address: ${address}` : '',
+    customerDetails.notes.trim() ? `Notes: ${customerDetails.notes.trim()}` : '',
+    '',
+    'Items:',
+    ...productLines,
+    '',
+    `Paid Amount: ₹${money(amount).toLocaleString('en-IN')}`,
+  ].filter(Boolean).join('\n')
+}
+
+function openWhatsAppOrderMessage({ customerDetails, items, orderId, amount }) {
+  const whatsappNumber = String(clientConfig.whatsappNumber || clientConfig.whatsapp || '').replace(/\D/g, '')
+  if (!whatsappNumber) throw new Error('WhatsApp number is not configured')
+
+  const message = buildWhatsAppMessage({ customerDetails, items, orderId, amount })
+  const whatsappUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`
+
+  window.location.href = whatsappUrl
+}
+
 function CartPage() {
   const { items, cartCount, cartTotal, updateQuantity, removeFromCart, clearCart } = useCart()
   const { errorMessage, showError, clearError } = useBrandedNotification()
@@ -106,8 +139,21 @@ function CartPage() {
         customerPhone: customerDetails.phone.trim(),
         customerEmail: '',
         productImage: items[0]?.imageUrl || '/dha-logo.png',
-        onSuccess: async () => {
+        onSuccess: async ({ orderId, amount }) => {
+          const purchasedItems = [...items]
+          const purchasedCustomerDetails = { ...customerDetails }
           clearCart()
+
+          try {
+            openWhatsAppOrderMessage({
+              customerDetails: purchasedCustomerDetails,
+              items: purchasedItems,
+              orderId,
+              amount,
+            })
+          } catch (error) {
+            showError(error.message || 'Payment succeeded, but WhatsApp could not be opened')
+          }
         },
         onFailure: (error) => showError(error.message || 'Payment failed. Please try again'),
       })
