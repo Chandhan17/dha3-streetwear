@@ -5,11 +5,24 @@ import Badge from '../components/Badge'
 import Button from '../components/Button'
 import EmptyState from '../components/EmptyState'
 import Loader from '../components/Loader'
+import SizeSelector from '../components/SizeSelector'
 import { fetchProducts } from '../services/productService'
 import { completePOSSale } from '../services/posService'
 
 function formatCurrency(value) {
   return `Rs. ${new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(Number(value || 0))}`
+}
+
+function normalizeSizes(sizes) {
+  if (Array.isArray(sizes)) return [...new Set(sizes.map((size) => String(size || '').trim()).filter(Boolean))]
+  if (typeof sizes === 'string') return [...new Set(sizes.split(',').map((size) => String(size || '').trim()).filter(Boolean))]
+  return []
+}
+
+function getSizeStock(product) {
+  const sizes = normalizeSizes(product?.sizes)
+  const source = product?.sizeStock && typeof product.sizeStock === 'object' ? product.sizeStock : {}
+  return Object.fromEntries(sizes.map((size) => [size, source[size] !== undefined ? Number(source[size]) : 1]))
 }
 
 function POS() {
@@ -25,6 +38,8 @@ function POS() {
   const [isProcessing, setIsProcessing] = useState(false)
   const [message, setMessage] = useState('')
   const [completedBill, setCompletedBill] = useState(null)
+  const [sizeSelectionProduct, setSizeSelectionProduct] = useState(null)
+  const [pendingSize, setPendingSize] = useState('')
 
   const loadProducts = async () => {
     setIsLoading(true)
@@ -57,20 +72,41 @@ function POS() {
   }, 0)
   const total = Math.max(0, totalBeforeGST + estimatedGST)
 
-  const addToCart = (product) => {
+  const openSizeSelection = (product) => {
+    setSizeSelectionProduct(product)
+    setPendingSize('')
+    setMessage('Select the customer size before adding the item.')
+  }
+
+  const addProductToCart = (product, selectedSize = 'N/A') => {
     const stock = Number(product.stock ?? 0)
-    const existing = cart.find((item) => item.id === product.id)
-    const nextQuantity = (existing?.quantity || 0) + 1
-    if (Number.isFinite(stock) && stock >= 0 && nextQuantity > stock) {
-      setMessage(stock === 0 ? 'This product is out of stock.' : `Only ${stock} unit(s) available.`)
+    const sizes = normalizeSizes(product.sizes)
+    const hasSizes = sizes.length > 0
+    const sizeStock = getSizeStock(product)
+    if (!Number.isFinite(stock) || stock <= 0) {
+      setMessage('This product is out of stock.')
       return
     }
+    if (hasSizes) {
+      if (!selectedSize || selectedSize === 'N/A') {
+        openSizeSelection(product)
+        return
+      }
+      if (Number(sizeStock[selectedSize] || 0) <= 0) {
+        setMessage(`Size ${selectedSize} is sold out.`)
+        return
+      }
+    }
+
+    const cartItemId = `${product.id}::${selectedSize}`
     setMessage('')
     setCart((current) => {
-      const found = current.find((item) => item.id === product.id)
-      if (found) return current.map((item) => item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item)
-      return [...current, { id: product.id, name: product.name, price: Number(product.price || 0), quantity: 1, barcode: product.barcode || '', sku: product.sku || '', stock, gstPercent: Number(product.gstPercent ?? product.gst ?? 0) }]
+      const found = current.find((item) => item.cartItemId === cartItemId)
+      if (found) return current
+      return [...current, { cartItemId, id: product.id, name: product.name, price: Number(product.price || 0), quantity: 1, barcode: product.barcode || '', sku: product.sku || '', stock, gstPercent: Number(product.gstPercent ?? product.gst ?? 0), selectedSize }]
     })
+    setSizeSelectionProduct(null)
+    setPendingSize('')
   }
 
   const handleBarcodeSubmit = (event) => {
@@ -83,16 +119,16 @@ function POS() {
       setBarcode('')
       return
     }
-    addToCart(product)
+    addProductToCart(product)
     setBarcode('')
   }
 
-  const updateQuantity = (id, delta) => {
+  const updateQuantity = (cartItemId, delta) => {
     setCart((current) => current.flatMap((item) => {
-      if (item.id !== id) return [item]
-      const nextQuantity = item.quantity + delta
+      if (item.cartItemId !== cartItemId) return [item]
+      const nextQuantity = item.selectedSize !== 'N/A' ? 1 : item.quantity + delta
       if (nextQuantity <= 0) return []
-      if (Number.isFinite(item.stock) && item.stock >= 0 && nextQuantity > item.stock) {
+      if (item.selectedSize === 'N/A' && Number.isFinite(item.stock) && item.stock >= 0 && nextQuantity > item.stock) {
         setMessage(`Only ${item.stock} unit(s) available.`)
         return [item]
       }
@@ -116,7 +152,7 @@ function POS() {
     setIsProcessing(true)
     setMessage('')
     try {
-      const response = await completePOSSale({ items: cart.map((item) => ({ productId: item.id, quantity: item.quantity })), paymentMethod, discountPercent: safeDiscountPercent })
+      const response = await completePOSSale({ items: cart.map((item) => ({ productId: item.id, quantity: item.quantity, selectedSize: item.selectedSize })), paymentMethod, discountPercent: safeDiscountPercent })
       setCompletedBill(response.bill)
       setCart([])
       setDiscountPercent('0')
@@ -148,11 +184,12 @@ function POS() {
         <form onSubmit={handleBarcodeSubmit} className="rounded-2xl border border-[#c19a6b]/30 bg-[#111111] p-4 shadow-soft"><label htmlFor="pos-barcode" className="mb-2 block text-xs font-semibold uppercase tracking-[0.15em] text-white/60">Barcode / SKU scanner</label><div className="flex gap-2"><input ref={barcodeRef} id="pos-barcode" value={barcode} onChange={(event) => setBarcode(event.target.value)} placeholder="Scan barcode and press Enter" className="min-w-0 flex-1 rounded-xl border border-white/15 bg-[#0b0b0b] px-4 py-3 text-sm text-white outline-none focus:border-[#c19a6b]" autoComplete="off" /><Button type="submit">Add</Button></div></form>
         {message && <div className="rounded-xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">{message}</div>}
         <div className="grid gap-5 xl:grid-cols-[1.35fr_0.85fr]">
-          <section className="rounded-2xl border border-white/10 bg-[#111111] p-4 shadow-soft"><div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="font-semibold text-white">Products</h2><p className="text-xs text-white/45">Online and store inventory use this same catalog.</p></div><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search products..." className="rounded-xl border border-white/15 bg-[#0b0b0b] px-3 py-2 text-sm text-white outline-none focus:border-[#c19a6b]" /></div>{isLoading && <Loader label="Loading products" />}{!isLoading && filteredProducts.length === 0 && <EmptyState title="No products" description="Add products from the admin product section." />}{!isLoading && filteredProducts.length > 0 && <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{filteredProducts.map((product) => { const stock = Number(product.stock ?? 0); const outOfStock = Number.isFinite(stock) && stock === 0; return <button type="button" key={product.id} disabled={outOfStock} onClick={() => addToCart(product)} className="rounded-xl border border-white/10 bg-[#0c0c0c] p-3 text-left transition hover:border-[#c19a6b]/50 disabled:cursor-not-allowed disabled:opacity-45"><div className="flex items-start justify-between gap-2"><p className="line-clamp-2 text-sm font-medium text-white">{product.name}</p><Badge tone={outOfStock ? 'danger' : 'success'}>{outOfStock ? 'Out' : `Stock ${stock}`}</Badge></div><p className="mt-2 text-sm font-semibold text-[#f0ddc4]">{formatCurrency(product.price)}</p><p className="mt-1 text-[11px] text-white/40">{product.barcode || product.sku || 'No barcode yet'}</p></button> })}</div>}</section>
-          <section className="rounded-2xl border border-white/10 bg-[#111111] p-4 shadow-soft"><div className="flex items-center justify-between border-b border-white/10 pb-3"><div><h2 className="font-semibold text-white">Current Bill</h2><p className="text-xs text-white/45">Items: {cart.reduce((sum, item) => sum + item.quantity, 0)}</p></div><Button variant="ghost" disabled={cart.length === 0} onClick={() => { setCart([]); setDiscountPercent('0') }}>Clear</Button></div><div className="max-h-[420px] space-y-3 overflow-auto py-4">{cart.length === 0 && <p className="py-12 text-center text-sm text-white/40">Scan or select a product to start.</p>}{cart.map((item) => <div key={item.id} className="rounded-xl border border-white/10 bg-[#0b0b0b] p-3"><div className="flex items-start justify-between gap-3"><div><p className="text-sm font-medium text-white">{item.name}</p><p className="text-xs text-white/45">{formatCurrency(item.price)} each</p></div><p className="text-sm font-semibold text-white">{formatCurrency(item.price * item.quantity)}</p></div><div className="mt-3 flex items-center justify-between"><div className="flex items-center gap-2"><button type="button" onClick={() => updateQuantity(item.id, -1)} className="h-7 w-7 rounded-lg border border-white/15 text-white">−</button><span className="w-6 text-center text-sm text-white">{item.quantity}</span><button type="button" onClick={() => updateQuantity(item.id, 1)} className="h-7 w-7 rounded-lg border border-white/15 text-white">+</button></div><button type="button" onClick={() => setCart((current) => current.filter((entry) => entry.id !== item.id))} className="text-xs text-red-300">Remove</button></div></div>)}</div><div className="space-y-3 border-t border-white/10 pt-4"><div><label htmlFor="pos-discount" className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-white/55">Discount %</label><div className="flex items-center gap-2"><input id="pos-discount" type="number" min="0" max="100" step="0.01" value={discountPercent} onChange={handleDiscountChange} placeholder="0" className="w-32 rounded-xl border border-white/15 bg-[#0b0b0b] px-3 py-2.5 text-sm text-white outline-none focus:border-[#c19a6b]" /><span className="text-sm text-white/50">%</span><span className="ml-auto text-sm text-white/60">Discount: {formatCurrency(discount)}</span></div></div><div className="flex justify-between text-sm text-white/60"><span>Subtotal</span><span>{formatCurrency(subtotal)}</span></div><div className="flex justify-between text-sm text-white/60"><span>GST</span><span>{formatCurrency(estimatedGST)}</span></div><div className="flex justify-between pt-1 text-lg font-semibold text-white"><span>Total</span><span>{formatCurrency(total)}</span></div></div><div className="mt-4 grid grid-cols-3 gap-2">{['cash', 'upi', 'card'].map((method) => <button type="button" key={method} onClick={() => setPaymentMethod(method)} className={`rounded-xl border px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] ${paymentMethod === method ? 'border-[#c19a6b] bg-[#c19a6b]/15 text-[#f0ddc4]' : 'border-white/10 text-white/55'}`}>{method}</button>)}</div><Button className="mt-3 w-full" disabled={cart.length === 0 || isProcessing} onClick={handleCompleteSale}>{isProcessing ? 'Processing Sale...' : 'Complete Sale'}</Button></section>
+          <section className="rounded-2xl border border-white/10 bg-[#111111] p-4 shadow-soft"><div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="font-semibold text-white">Products</h2><p className="text-xs text-white/45">Online and store inventory use this same catalog. Products with sizes have 1 unit available for each size.</p></div><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search products..." className="rounded-xl border border-white/15 bg-[#0b0b0b] px-3 py-2 text-sm text-white outline-none focus:border-[#c19a6b]" /></div>{isLoading && <Loader label="Loading products" />}{!isLoading && filteredProducts.length === 0 && <EmptyState title="No products" description="Add products from the admin product section." />}{!isLoading && filteredProducts.length > 0 && <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{filteredProducts.map((product) => { const stock = Number(product.stock ?? 0); const outOfStock = Number.isFinite(stock) && stock === 0; return <button type="button" key={product.id} disabled={outOfStock} onClick={() => addProductToCart(product)} className="rounded-xl border border-white/10 bg-[#0c0c0c] p-3 text-left transition hover:border-[#c19a6b]/50 disabled:cursor-not-allowed disabled:opacity-45"><div className="flex items-start justify-between gap-2"><p className="line-clamp-2 text-sm font-medium text-white">{product.name}</p><Badge tone={outOfStock ? 'danger' : 'success'}>{outOfStock ? 'Out' : `Stock ${stock}`}</Badge></div><p className="mt-2 text-sm font-semibold text-[#f0ddc4]">{formatCurrency(product.price)}</p><p className="mt-1 text-[11px] text-white/40">{product.barcode || product.sku || 'No barcode yet'}</p></button> })}</div>}</section>
+          <section className="rounded-2xl border border-white/10 bg-[#111111] p-4 shadow-soft"><div className="flex items-center justify-between border-b border-white/10 pb-3"><div><h2 className="font-semibold text-white">Current Bill</h2><p className="text-xs text-white/45">Items: {cart.reduce((sum, item) => sum + item.quantity, 0)}</p></div><Button variant="ghost" disabled={cart.length === 0} onClick={() => { setCart([]); setDiscountPercent('0') }}>Clear</Button></div><div className="max-h-[420px] space-y-3 overflow-auto py-4">{cart.length === 0 && <p className="py-12 text-center text-sm text-white/40">Scan or select a product to start.</p>}{cart.map((item) => <div key={item.cartItemId} className="rounded-xl border border-white/10 bg-[#0b0b0b] p-3"><div className="flex items-start justify-between gap-3"><div><p className="text-sm font-medium text-white">{item.name}</p><p className="text-xs text-white/45">{formatCurrency(item.price)} each{item.selectedSize !== 'N/A' ? ` · Size ${item.selectedSize}` : ''}</p></div><p className="text-sm font-semibold text-white">{formatCurrency(item.price * item.quantity)}</p></div><div className="mt-3 flex items-center justify-between"><div className="flex items-center gap-2"><button type="button" disabled={item.selectedSize !== 'N/A'} onClick={() => updateQuantity(item.cartItemId, -1)} className="h-7 w-7 rounded-lg border border-white/15 text-white disabled:cursor-not-allowed disabled:opacity-30">−</button><span className="w-6 text-center text-sm text-white">{item.quantity}</span><button type="button" disabled={item.selectedSize !== 'N/A'} onClick={() => updateQuantity(item.cartItemId, 1)} className="h-7 w-7 rounded-lg border border-white/15 text-white disabled:cursor-not-allowed disabled:opacity-30">+</button></div><button type="button" onClick={() => setCart((current) => current.filter((entry) => entry.cartItemId !== item.cartItemId))} className="text-xs text-red-300">Remove</button></div></div>)}</div><div className="space-y-3 border-t border-white/10 pt-4"><div><label htmlFor="pos-discount" className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-white/55">Discount %</label><div className="flex items-center gap-2"><input id="pos-discount" type="number" min="0" max="100" step="0.01" value={discountPercent} onChange={handleDiscountChange} placeholder="0" className="w-32 rounded-xl border border-white/15 bg-[#0b0b0b] px-3 py-2.5 text-sm text-white outline-none focus:border-[#c19a6b]" /><span className="text-sm text-white/50">%</span><span className="ml-auto text-sm text-white/60">Discount: {formatCurrency(discount)}</span></div></div><div className="flex justify-between text-sm text-white/60"><span>Subtotal</span><span>{formatCurrency(subtotal)}</span></div><div className="flex justify-between text-sm text-white/60"><span>GST</span><span>{formatCurrency(estimatedGST)}</span></div><div className="flex justify-between pt-1 text-lg font-semibold text-white"><span>Total</span><span>{formatCurrency(total)}</span></div></div><div className="mt-4 grid grid-cols-3 gap-2">{['cash', 'upi', 'card'].map((method) => <button type="button" key={method} onClick={() => setPaymentMethod(method)} className={`rounded-xl border px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] ${paymentMethod === method ? 'border-[#c19a6b] bg-[#c19a6b]/15 text-[#f0ddc4]' : 'border-white/10 text-white/55'}`}>{method}</button>)}</div><Button className="mt-3 w-full" disabled={cart.length === 0 || isProcessing} onClick={handleCompleteSale}>{isProcessing ? 'Processing Sale...' : 'Complete Sale'}</Button></section>
         </div>
       </div>
-      {completedBill && <div id="pos-receipt" className="mx-auto w-[80mm] bg-white p-4 text-black"><div className="text-center"><h2 className="text-lg font-bold">DHA THREE</h2><p className="text-xs">POS BILL</p><p className="text-xs">{completedBill.billNo}</p></div><div className="my-2 border-t border-dashed border-black" />{completedBill.items?.map((item) => <div key={item.productId} className="mb-1 text-xs"><div className="flex justify-between gap-2"><span>{item.name} x {item.quantity}</span><span>{formatCurrency(item.discountedLineTotal ?? item.lineSubtotal)}</span></div></div>)}<div className="my-2 border-t border-dashed border-black" /><div className="space-y-1 text-xs"><div className="flex justify-between"><span>Subtotal</span><span>{formatCurrency(completedBill.subtotal)}</span></div><div className="flex justify-between"><span>Discount ({Number(completedBill.discountPercent || 0)}%)</span><span>{formatCurrency(completedBill.discount)}</span></div><div className="flex justify-between"><span>GST</span><span>{formatCurrency(completedBill.gst)}</span></div><div className="flex justify-between text-sm font-bold"><span>Total</span><span>{formatCurrency(completedBill.total)}</span></div><div className="flex justify-between"><span>Payment</span><span>{String(completedBill.paymentMethod || '').toUpperCase()}</span></div></div><p className="mt-4 text-center text-[10px]">Thank you for shopping with us.</p><div className="mt-4 flex justify-center gap-2 print:hidden"><Button onClick={() => window.print()}>Print Receipt</Button><Button variant="secondary" onClick={() => { setCompletedBill(null); barcodeRef.current?.focus() }}>New Sale</Button></div></div>}
+      {sizeSelectionProduct && <div className="fixed inset-0 z-[100] grid place-items-center bg-black/75 px-4 backdrop-blur-sm"><div className="w-full max-w-md rounded-2xl border border-white/15 bg-[#111111] p-5 shadow-2xl"><div className="flex items-start justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#c19a6b]">Size Required</p><h2 className="mt-1 text-xl font-semibold text-white">{sizeSelectionProduct.name}</h2><p className="mt-1 text-xs text-white/45">Only 1 unit is available for each size.</p></div><button type="button" onClick={() => { setSizeSelectionProduct(null); setPendingSize(''); barcodeRef.current?.focus() }} className="text-white/55 hover:text-white">✕</button></div><div className="mt-5"><SizeSelector sizes={normalizeSizes(sizeSelectionProduct.sizes)} selectedSize={pendingSize} sizeStock={getSizeStock(sizeSelectionProduct)} onSelectSize={setPendingSize} /></div><div className="mt-5 flex gap-2"><Button variant="secondary" className="flex-1" onClick={() => { setSizeSelectionProduct(null); setPendingSize(''); barcodeRef.current?.focus() }}>Cancel</Button><Button className="flex-1" disabled={!pendingSize} onClick={() => addProductToCart(sizeSelectionProduct, pendingSize)}>Add Size</Button></div></div></div>}
+      {completedBill && <div id="pos-receipt" className="mx-auto w-[80mm] bg-white p-4 text-black"><div className="text-center"><h2 className="text-lg font-bold">DHA THREE</h2><p className="text-xs">POS BILL</p><p className="text-xs">{completedBill.billNo}</p></div><div className="my-2 border-t border-dashed border-black" />{completedBill.items?.map((item) => <div key={`${item.productId}-${item.selectedSize}`} className="mb-1 text-xs"><div className="flex justify-between gap-2"><span>{item.name} x {item.quantity}{item.selectedSize !== 'N/A' ? ` (${item.selectedSize})` : ''}</span><span>{formatCurrency(item.discountedLineTotal ?? item.lineSubtotal)}</span></div></div>)}<div className="my-2 border-t border-dashed border-black" /><div className="space-y-1 text-xs"><div className="flex justify-between"><span>Subtotal</span><span>{formatCurrency(completedBill.subtotal)}</span></div><div className="flex justify-between"><span>Discount ({Number(completedBill.discountPercent || 0)}%)</span><span>{formatCurrency(completedBill.discount)}</span></div><div className="flex justify-between"><span>GST</span><span>{formatCurrency(completedBill.gst)}</span></div><div className="flex justify-between text-sm font-bold"><span>Total</span><span>{formatCurrency(completedBill.total)}</span></div><div className="flex justify-between"><span>Payment</span><span>{String(completedBill.paymentMethod || '').toUpperCase()}</span></div></div><p className="mt-4 text-center text-[10px]">Thank you for shopping with us.</p><div className="mt-4 flex justify-center gap-2 print:hidden"><Button onClick={() => window.print()}>Print Receipt</Button><Button variant="secondary" onClick={() => { setCompletedBill(null); barcodeRef.current?.focus() }}>New Sale</Button></div></div>}
     </AdminLayout>
   )
 }
