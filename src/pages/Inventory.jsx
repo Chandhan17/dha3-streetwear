@@ -7,6 +7,17 @@ import EmptyState from '../components/EmptyState'
 import Loader from '../components/Loader'
 import { fetchProducts } from '../services/productService'
 import { adjustInventory } from '../services/inventoryService'
+import { barcodeSvg } from '../utils/barcode'
+
+function printBarcode(product) {
+  const barcode = product.barcode || ''
+  if (!barcode) return
+  const svg = barcodeSvg(barcode)
+  const printWindow = window.open('', '_blank', 'width=500,height=400')
+  if (!printWindow) return
+  printWindow.document.write(`<!doctype html><html><head><title>Barcode - ${String(product.name || '').replace(/</g, '&lt;')}</title><style>@page{size:auto;margin:8mm}body{margin:0;background:#fff;font-family:Arial,sans-serif}.label{width:58mm;min-height:32mm;padding:4mm;box-sizing:border-box;text-align:center}.name{font-size:12px;font-weight:700;margin-bottom:2mm;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.price{font-size:11px;margin-top:1mm}</style></head><body><div class="label"><div class="name">${String(product.name || 'Product').replace(/[&<>]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}</div>${svg}<div class="price">MRP ₹${Number(product.mrp || product.price || 0).toFixed(2)}</div></div><script>window.onload=()=>{window.print();window.onafterprint=()=>window.close()}</script></body></html>`)
+  printWindow.document.close()
+}
 
 function Inventory() {
   const navigate = useNavigate()
@@ -19,14 +30,9 @@ function Inventory() {
 
   const loadProducts = async () => {
     setIsLoading(true)
-    try {
-      setProducts(await fetchProducts({ forceRefresh: true }))
-      setMessage('')
-    } catch (error) {
-      setMessage(error.message || 'Unable to load inventory.')
-    } finally {
-      setIsLoading(false)
-    }
+    try { setProducts(await fetchProducts({ forceRefresh: true })); setMessage('') }
+    catch (error) { setMessage(error.message || 'Unable to load inventory.') }
+    finally { setIsLoading(false) }
   }
 
   useEffect(() => { loadProducts() }, [])
@@ -38,25 +44,16 @@ function Inventory() {
   }, [products, search])
 
   const updateStock = async (product, direction) => {
-    const raw = quantities[product.id]
-    const amount = Number(raw)
-    if (!Number.isInteger(amount) || amount <= 0) {
-      setMessage('Enter a whole-number quantity greater than 0.')
-      return
-    }
-
+    const amount = Number(quantities[product.id])
+    if (!Number.isInteger(amount) || amount <= 0) { setMessage('Enter a whole-number quantity greater than 0.'); return }
     const delta = direction === 'in' ? amount : -amount
-    setSavingId(product.id)
-    setMessage('')
+    setSavingId(product.id); setMessage('')
     try {
-      const result = await adjustInventory({ productId: product.id, quantity: delta, reason: direction === 'in' ? 'Opening stock / stock received' : 'Manual stock correction' })
+      const result = await adjustInventory({ productId: product.id, quantity: delta, reason: direction === 'in' ? 'Stock received' : 'Manual stock correction' })
       setProducts((current) => current.map((item) => item.id === product.id ? { ...item, stock: result.inventory.stockAfter } : item))
       setQuantities((current) => ({ ...current, [product.id]: '' }))
-    } catch (error) {
-      setMessage(error.message || 'Unable to update stock.')
-    } finally {
-      setSavingId('')
-    }
+    } catch (error) { setMessage(error.message || 'Unable to update stock.') }
+    finally { setSavingId('') }
   }
 
   const handleNavigation = (key) => {
@@ -76,7 +73,7 @@ function Inventory() {
         {message && <div className="rounded-xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">{message}</div>}
         {isLoading && <Loader label="Loading inventory" />}
         {!isLoading && filteredProducts.length === 0 && <EmptyState title="No products found" description="Add products first, then initialize their stock here." />}
-        {!isLoading && filteredProducts.length > 0 && <div className="overflow-x-auto rounded-2xl border border-white/10 bg-[#111111] shadow-soft"><table className="w-full min-w-[820px] text-left"><thead><tr className="border-b border-white/10 text-[11px] uppercase tracking-[0.12em] text-white/45"><th className="px-4 py-3">Product</th><th className="px-4 py-3">SKU / Barcode</th><th className="px-4 py-3">Current Stock</th><th className="px-4 py-3">Adjustment</th></tr></thead><tbody>{filteredProducts.map((product) => { const stock = Number(product.stock ?? 0); const isSaving = savingId === product.id; return <tr key={product.id} className="border-b border-white/5"><td className="px-4 py-4"><p className="text-sm font-medium text-white">{product.name}</p><p className="text-xs text-white/40">{product.category || 'Uncategorized'}</p></td><td className="px-4 py-4 text-xs text-white/50">{product.sku || '-'}<br />{product.barcode || '-'}</td><td className="px-4 py-4"><Badge tone={stock > 0 ? 'success' : 'danger'}>{stock} unit(s)</Badge></td><td className="px-4 py-4"><div className="flex items-center gap-2"><input type="number" min="1" step="1" value={quantities[product.id] || ''} onChange={(event) => setQuantities((current) => ({ ...current, [product.id]: event.target.value }))} placeholder="Qty" className="w-24 rounded-xl border border-white/15 bg-[#0b0b0b] px-3 py-2 text-sm text-white outline-none focus:border-[#c19a6b]" /><Button disabled={isSaving} onClick={() => updateStock(product, 'in')}>+ Stock</Button><Button variant="danger" disabled={isSaving || stock <= 0} onClick={() => updateStock(product, 'out')}>- Stock</Button></div></td></tr> })}</tbody></table></div>}
+        {!isLoading && filteredProducts.length > 0 && <div className="overflow-x-auto rounded-2xl border border-white/10 bg-[#111111] shadow-soft"><table className="w-full min-w-[980px] text-left"><thead><tr className="border-b border-white/10 text-[11px] uppercase tracking-[0.12em] text-white/45"><th className="px-4 py-3">Product</th><th className="px-4 py-3">SKU / Barcode</th><th className="px-4 py-3">Current Stock</th><th className="px-4 py-3">Adjustment</th><th className="px-4 py-3">Barcode</th></tr></thead><tbody>{filteredProducts.map((product) => { const stock = Number(product.stock ?? 0); const isSaving = savingId === product.id; return <tr key={product.id} className="border-b border-white/5"><td className="px-4 py-4"><p className="text-sm font-medium text-white">{product.name}</p><p className="text-xs text-white/40">{product.category || 'Uncategorized'}</p></td><td className="px-4 py-4 text-xs text-white/50">{product.sku || '-'}<br />{product.barcode || '-'}</td><td className="px-4 py-4"><Badge tone={stock > 0 ? 'success' : 'danger'}>{stock} unit(s)</Badge></td><td className="px-4 py-4"><div className="flex items-center gap-2"><input type="number" min="1" step="1" value={quantities[product.id] || ''} onChange={(event) => setQuantities((current) => ({ ...current, [product.id]: event.target.value }))} placeholder="Qty" className="w-24 rounded-xl border border-white/15 bg-[#0b0b0b] px-3 py-2 text-sm text-white outline-none focus:border-[#c19a6b]" /><Button disabled={isSaving} onClick={() => updateStock(product, 'in')}>+ Stock</Button><Button variant="danger" disabled={isSaving || stock <= 0} onClick={() => updateStock(product, 'out')}>- Stock</Button></div></td><td className="px-4 py-4"><Button variant="secondary" disabled={!product.barcode} onClick={() => printBarcode(product)}>Print Label</Button></td></tr> })}</tbody></table></div>}
       </div>
     </AdminLayout>
   )
