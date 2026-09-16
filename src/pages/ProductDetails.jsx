@@ -41,7 +41,7 @@ function ProductDetails() {
   const [failedSizeChartImage, setFailedSizeChartImage] = useState('')
   const shakeTimeoutRef = useRef(null)
   const { errorMessage, showError, clearError } = useBrandedNotification()
-  const { addToCart } = useCart()
+  const { addToCart, clearCart } = useCart()
 
   useEffect(() => {
     let isMounted = true
@@ -141,7 +141,9 @@ function ProductDetails() {
       return
     }
     if (!ensureCanBuy()) return
-    addToCart(product, { selectedSize: hasSizes ? selectedSize : 'N/A' })
+    // Buy Now is a dedicated checkout flow, so replace any previous cart contents.
+    clearCart()
+    addToCart(product, { selectedSize: hasSizes ? selectedSize : 'N/A', quantity: 1 })
     navigate('/cart')
   }
 
@@ -183,7 +185,7 @@ function ProductDetails() {
                     <div className="grid gap-3 sm:grid-cols-3">
                       <button type="button" onClick={handleAddToCart} className="inline-flex w-full items-center justify-center rounded-full border border-white/15 bg-white/5 px-5 py-3 text-sm font-semibold uppercase tracking-[0.08em] text-white transition hover:-translate-y-0.5 hover:bg-white/10">Add to Cart</button>
                       <button type="button" onClick={handleBuyNow} className="inline-flex w-full items-center justify-center rounded-full border border-white/15 bg-white px-5 py-3 text-sm font-semibold uppercase tracking-[0.08em] text-black transition hover:-translate-y-0.5 hover:bg-white/90">Buy Now</button>
-                      <button type="button" onClick={handleShareProduct} className="inline-flex w-full items-center justify-center rounded-full border border-white/15 px-5 py-3 text-sm font-semibold uppercase tracking-[0.08em] text-white transition hover:-translate-y-0.5 hover:bg-white/10">Share</button>
+                      <button type="button" onClick={handleShareProduct} className="inline-flex w-full items-center justify-center rounded-full border border-white/15 px-5 py-3 text-sm font-semibold uppercase tracking-[0.08em] text-white transition hover:-translate-y-0.5 hover:bg-white/90">Share</button>
                     </div>
                   </>
                 )}
