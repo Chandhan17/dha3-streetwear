@@ -116,7 +116,7 @@ function Home() {
             <div className="space-y-1"><p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-black/45">Search</p><h2 className="heading-md text-black">Results for "{searchQuery.trim()}"</h2>{!isLoading && <p className="text-xs font-medium uppercase tracking-[0.18em] text-black/55">{filteredProducts.length} {filteredProducts.length === 1 ? 'Style' : 'Styles'} Found</p>}</div>
             {isLoading && <div className="grid grid-cols-2 gap-5 md:gap-6 lg:grid-cols-3 xl:grid-cols-4">{[...Array(4)].map((_, index) => <div key={index} className="h-72 animate-pulse border border-black/10 bg-black/5" />)}</div>}
             {!isLoading && filteredProducts.length === 0 && <div className="border border-black/15 px-6 py-12 text-center text-black/65"><p className="text-lg">No products found</p><p className="text-sm">Try another keyword</p></div>}
-            {!isLoading && filteredProducts.length > 0 && <div className="grid grid-cols-2 justify-items-start gap-5 md:gap-6 lg:grid-cols-3 xl:grid-cols-4">{filteredProducts.map((product, index) => <ProductCard key={`top-search-${product.id}`} product={product} showNewTag={index < 2} discountLabel={Number(product.price || 0) >= 2000 ? '10% OFF' : ''} onBuyNowClick={handleBuyNowClick} onError={handleProductCardError} />)}</div>}
+            {!isLoading && filteredProducts.length > 0 && <div className="grid grid-cols-2 justify-items-start gap-5 md:gap-6 lg:grid-cols-3 xl:grid-cols-4">{filteredProducts.map((product) => <ProductCard key={`top-search-${product.id}`} product={product} onBuyNowClick={handleBuyNowClick} onError={handleProductCardError} />)}</div>}
           </div>
         </Motion.section>
       )}
@@ -136,7 +136,7 @@ function Home() {
             {hasNoResults && <div className="border border-black/15 px-6 py-16 text-center text-black/65"><p className="text-lg">No products found</p><p className="text-sm">Try adjusting your filters</p></div>}
             {!isLoading && categorySections.length > 0 && <div className="space-y-16">{categorySections.map((section) => <Motion.section key={section.title} className="space-y-6" initial={fadeUpInitial} whileInView={fadeUpInView} viewport={{ once: true, amount: 0.2 }} transition={fadeUpTransition}>
               <Motion.div className="flex items-end justify-between gap-3" initial={fadeUpInitial} whileInView={fadeUpInView} viewport={{ once: true, amount: 0.7 }} transition={{ ...fadeUpTransition, delay: 0.05 }}><h3 className="heading-md text-black">{section.title}</h3><p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-black/45">{section.products.length} Styles</p></Motion.div>
-              <div className="grid grid-cols-2 justify-items-start gap-5 md:gap-6 lg:grid-cols-3 xl:grid-cols-4">{section.products.map((product, index) => <ProductCard key={product.id} product={product} showNewTag={index < 2} discountLabel={Number(product.price || 0) >= 2000 ? '10% OFF' : ''} onBuyNowClick={handleBuyNowClick} onError={handleProductCardError} />)}</div>
+              <div className="grid grid-cols-2 justify-items-start gap-5 md:gap-6 lg:grid-cols-3 xl:grid-cols-4">{section.products.map((product) => <ProductCard key={product.id} product={product} onBuyNowClick={handleBuyNowClick} onError={handleProductCardError} />)}</div>
             </Motion.section>)}</div>}
           </div>
         </Motion.main>
