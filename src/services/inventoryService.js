@@ -1,12 +1,14 @@
+import { auth } from '../firebase'
+
 const API_URL = String(import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
 
-function getAuthToken() {
-  const authUser = JSON.parse(localStorage.getItem('authUser') || 'null')
-  return authUser?.accessToken || authUser?.token || ''
+async function getAuthToken() {
+  const user = auth.currentUser
+  return user ? user.getIdToken() : ''
 }
 
 async function request(path, options = {}) {
-  const token = getAuthToken()
+  const token = await getAuthToken()
   const response = await fetch(`${API_URL}${path}`, {
     ...options,
     headers: {
@@ -38,22 +40,14 @@ export async function adjustInventory({ productId, quantity, reason = 'manual_ad
 
   return request('/api/admin/inventory/adjust', {
     method: 'POST',
-    body: JSON.stringify({
-      productId,
-      quantity: normalizedQuantity,
-      reason,
-      referenceId,
-    }),
+    body: JSON.stringify({ productId, quantity: normalizedQuantity, reason, referenceId }),
   })
 }
 
 export async function getInventoryTransactions({ productId = '', limit = 100 } = {}) {
   const query = new URLSearchParams()
 
-  if (productId) {
-    query.set('productId', productId)
-  }
-
+  if (productId) query.set('productId', productId)
   query.set('limit', String(Math.min(Math.max(Number(limit) || 100, 1), 500)))
 
   return request(`/api/admin/inventory/transactions?${query.toString()}`)
