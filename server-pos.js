@@ -103,7 +103,8 @@ app.post('/api/admin/pos/sale', attachUserFromToken, isAdmin, async (req, res) =
     const items = normalizeItems(req.body?.items)
     const paymentMethod = String(req.body?.paymentMethod || '').trim().toLowerCase()
     const customer = req.body?.customer && typeof req.body.customer === 'object' ? req.body.customer : {}
-    const discount = asMoney(req.body?.discount)
+    const requestedDiscountPercent = asMoney(req.body?.discountPercent)
+    const discountPercent = Math.min(100, Math.max(0, requestedDiscountPercent))
 
     if (items.length === 0) return res.status(400).json({ success: false, message: 'At least one valid item is required' })
     if (!['cash', 'upi', 'card'].includes(paymentMethod)) return res.status(400).json({ success: false, message: 'Payment method must be cash, upi, or card' })
@@ -137,7 +138,7 @@ app.post('/api/admin/pos/sale', attachUserFromToken, isAdmin, async (req, res) =
         saleItems.push({ productId: item.productId, name: String(product.name || 'Product').trim() || 'Product', sku: String(product.sku || '').trim(), barcode: String(product.barcode || '').trim(), selectedSize: item.selectedSize, quantity: item.quantity, unitPrice, purchasePrice, gstPercent, lineSubtotal })
       })
 
-      const safeDiscount = Math.min(discount, subtotal)
+      const safeDiscount = asMoney(subtotal * discountPercent / 100)
       const discountRatio = subtotal > 0 ? (subtotal - safeDiscount) / subtotal : 0
       saleItems.forEach((item) => {
         item.discountedLineTotal = asMoney(item.lineSubtotal * discountRatio)
@@ -163,6 +164,7 @@ app.post('/api/admin/pos/sale', attachUserFromToken, isAdmin, async (req, res) =
         customer: { name: String(customer.name || '').trim(), phone: String(customer.phone || '').trim() },
         items: saleItems,
         subtotal,
+        discountPercent,
         discount: safeDiscount,
         gst: gstTotal,
         total: totalAmount,
@@ -177,7 +179,7 @@ app.post('/api/admin/pos/sale', attachUserFromToken, isAdmin, async (req, res) =
         updatedAt: FieldValue.serverTimestamp(),
       })
 
-      return { billId: billRef.id, billNo, items: saleItems, subtotal, discount: safeDiscount, gst: gstTotal, total: totalAmount, cost: costTotal, profit, margin: totalAmount > 0 ? asMoney((profit / totalAmount) * 100) : 0, paymentMethod }
+      return { billId: billRef.id, billNo, items: saleItems, subtotal, discountPercent, discount: safeDiscount, gst: gstTotal, total: totalAmount, cost: costTotal, profit, margin: totalAmount > 0 ? asMoney((profit / totalAmount) * 100) : 0, paymentMethod }
     })
 
     return res.status(201).json({ success: true, bill: result })
