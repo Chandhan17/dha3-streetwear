@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { motion as Motion } from 'framer-motion'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import BrandStrip from '../components/BrandStrip'
 import BrandedNotification from '../components/BrandedNotification'
 import CategoryGridSection from '../components/CategoryGridSection'
@@ -23,6 +23,20 @@ const fadeUpInView = { opacity: 1, y: 0 }
 
 function normalizeCategoryName(category) { return String(category || FALLBACK_CATEGORY).trim().toLowerCase() }
 function normalizeValue(value) { return String(value || '').trim().toLowerCase() }
+function isWithinNewArrivalWindow(createdAt) {
+  if (!createdAt) return false
+  let createdDate
+  try {
+    if (typeof createdAt?.toDate === 'function') createdDate = createdAt.toDate()
+    else if (typeof createdAt === 'object' && Number.isFinite(Number(createdAt?.seconds))) createdDate = new Date(Number(createdAt.seconds) * 1000)
+    else createdDate = new Date(createdAt)
+  } catch {
+    return false
+  }
+  if (!(createdDate instanceof Date) || Number.isNaN(createdDate.getTime())) return false
+  const ageMs = Date.now() - createdDate.getTime()
+  return ageMs >= 0 && ageMs < 7 * 24 * 60 * 60 * 1000
+}
 function matchesPriceRange(price, selectedPriceRange) {
   const safePrice = Number(price || 0)
   if (selectedPriceRange === 'under-500') return safePrice < 500
@@ -33,10 +47,19 @@ function matchesPriceRange(price, selectedPriceRange) {
 
 function Home() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const { addToCart, clearCart } = useCart()
+  const requestedView = normalizeValue(searchParams.get('view'))
   const [products, setProducts] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
+
+  const newArrivalProducts = useMemo(() => products.filter((product) => isWithinNewArrivalWindow(product?.createdAt)), [products])
+  const saleProducts = useMemo(() => products.filter((product) => Number(product?.discountPercent || 0) > 0), [products])
+  const hasRequestedNewArrivals = requestedView === 'new' && newArrivalProducts.length > 0
+  const hasRequestedSaleProducts = requestedView === 'sale' && saleProducts.length > 0
+  const activeCollectionView = hasRequestedNewArrivals ? 'new' : hasRequestedSaleProducts ? 'sale' : 'collections'
+  const viewProducts = activeCollectionView === 'new' ? newArrivalProducts : activeCollectionView === 'sale' ? saleProducts : products
   const [selectedCategory] = useState('All')
   const [selectedSizes] = useState([])
   const [selectedPriceRange] = useState('all')
@@ -46,7 +69,7 @@ function Home() {
     const normalizedQuery = normalizeValue(searchQuery)
     const normalizedSelectedCategory = normalizeCategoryName(selectedCategory)
     const normalizedSelectedSizes = selectedSizes.map((size) => normalizeValue(size))
-    return products.filter((product) => {
+    return viewProducts.filter((product) => {
       const productName = normalizeValue(product.name)
       const productCategory = normalizeCategoryName(product.category)
       const productSizes = Array.isArray(product.sizes) ? product.sizes.map((size) => normalizeValue(size)) : []
@@ -55,7 +78,7 @@ function Home() {
         && (normalizedSelectedSizes.length === 0 || normalizedSelectedSizes.some((size) => productSizes.includes(size)))
         && matchesPriceRange(product.effectivePrice ?? product.price, selectedPriceRange)
     })
-  }, [products, searchQuery, selectedCategory, selectedSizes, selectedPriceRange])
+  }, [viewProducts, searchQuery, selectedCategory, selectedSizes, selectedPriceRange])
 
   const categorySections = useMemo(() => {
     const configured = Array.isArray(clientConfig.productCategories) ? clientConfig.productCategories : []
@@ -130,7 +153,7 @@ function Home() {
 
         <Motion.main id="shop" className="w-full bg-white py-16 text-black md:py-20" initial={fadeUpInitial} whileInView={fadeUpInView} viewport={{ once: true, amount: 0.15 }} transition={{ ...fadeUpTransition, delay: 0.05 }}>
           <div className="container-section space-y-12">
-            <Motion.div className="space-y-2" initial={fadeUpInitial} whileInView={fadeUpInView} viewport={{ once: true, amount: 0.5 }} transition={{ ...fadeUpTransition, delay: 0.08 }}><p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-black/45">Shop</p><h2 className="heading-lg text-4xl text-black md:text-6xl">The Collection</h2></Motion.div>
+            <Motion.div className="space-y-2" initial={fadeUpInitial} whileInView={fadeUpInView} viewport={{ once: true, amount: 0.5 }} transition={{ ...fadeUpTransition, delay: 0.08 }}><p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-black">{activeCollectionView === 'new' ? 'New Arrivals' : activeCollectionView === 'sale' ? 'Sale' : 'Shop'}</p><h2 className="heading-lg text-4xl text-black md:text-6xl">{activeCollectionView === 'new' ? 'New Arrivals' : activeCollectionView === 'sale' ? 'Sale' : 'The Collection'}</h2>{requestedView === 'new' && newArrivalProducts.length === 0 && <p className="text-sm text-black/55">No new arrivals right now. Showing the full collection.</p>}{requestedView === 'sale' && saleProducts.length === 0 && <p className="text-sm text-black/55">No sale products right now. Showing the full collection.</p>}</Motion.div>
             {isLoading && <div className="grid grid-cols-2 gap-5 md:gap-6 lg:grid-cols-3 xl:grid-cols-4">{[...Array(8)].map((_, index) => <div key={index} className="h-72 animate-pulse border border-black/10 bg-black/5" />)}</div>}
             {!isLoading && products.length === 0 && <div className="border border-black/15 px-6 py-16 text-center text-black/65"><p className="text-lg">No products available yet.</p><p className="text-sm">Add items from the admin dashboard.</p></div>}
             {hasNoResults && <div className="border border-black/15 px-6 py-16 text-center text-black/65"><p className="text-lg">No products found</p><p className="text-sm">Try adjusting your filters</p></div>}
