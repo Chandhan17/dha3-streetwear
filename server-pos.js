@@ -151,29 +151,34 @@ app.post('/api/admin/pos/sale', attachUserFromToken, isAdmin, async (req, res) =
         if (!snapshot.exists) throw new Error(`Product not found: ${item.productId}`)
         const product = snapshot.data() || {}
         const currentStock = Number(product.stock ?? product.openingStock ?? 0)
-        const unitPrice = asMoney(product.price ?? product.salePrice)
+        const baseUnitPrice = asMoney(product.price ?? product.salePrice)
+        const productDiscountPercent = Math.min(100, Math.max(0, asMoney(product.discountPercent ?? product.discount ?? 0)))
+        const unitPrice = asMoney(baseUnitPrice * (1 - productDiscountPercent / 100))
         const purchasePrice = asMoney(product.purchasePrice ?? product.prchPrice ?? product.costPrice)
         const gstPercent = Math.max(0, asMoney(product.gstPercent ?? product.gst ?? 0))
         validateRequestedSize(product, item)
         if (!Number.isFinite(currentStock) || currentStock < item.quantity) throw new Error(`Insufficient stock for ${String(product.name || item.productId)}`)
         if (unitPrice <= 0) throw new Error(`Invalid sale price for ${String(product.name || item.productId)}`)
 
-        const lineSubtotal = asMoney(unitPrice * item.quantity)
+        const lineSubtotal = asMoney(baseUnitPrice * item.quantity)
+        const lineAfterProductDiscount = asMoney(unitPrice * item.quantity)
         subtotal = asMoney(subtotal + lineSubtotal)
         costTotal = asMoney(costTotal + purchasePrice * item.quantity)
-        saleItems.push({ productId: item.productId, name: String(product.name || 'Product').trim() || 'Product', sku: String(product.sku || '').trim(), barcode: String(product.barcode || '').trim(), selectedSize: item.selectedSize, quantity: item.quantity, unitPrice, purchasePrice, gstPercent, lineSubtotal })
+        saleItems.push({ productId: item.productId, name: String(product.name || 'Product').trim() || 'Product', sku: String(product.sku || '').trim(), barcode: String(product.barcode || '').trim(), selectedSize: item.selectedSize, quantity: item.quantity, baseUnitPrice, productDiscountPercent, unitPrice, purchasePrice, gstPercent, lineSubtotal, lineAfterProductDiscount })
       })
 
-      const safeDiscount = asMoney(subtotal * discountPercent / 100)
-      const discountRatio = subtotal > 0 ? (subtotal - safeDiscount) / subtotal : 0
+      const productDiscountTotal = asMoney(saleItems.reduce((sum, item) => sum + (item.lineSubtotal - item.lineAfterProductDiscount), 0))
+      const safeDiscount = asMoney((subtotal - productDiscountTotal) * discountPercent / 100)
+      const discountRatio = (subtotal - productDiscountTotal) > 0 ? ((subtotal - productDiscountTotal) - safeDiscount) / (subtotal - productDiscountTotal) : 0
       saleItems.forEach((item) => {
-        item.discountedLineTotal = asMoney(item.lineSubtotal * discountRatio)
+        item.discountedLineTotal = asMoney(item.lineAfterProductDiscount * discountRatio)
         item.gstAmount = asMoney(item.discountedLineTotal * item.gstPercent / 100)
         gstTotal = asMoney(gstTotal + item.gstAmount)
       })
 
-      const totalAmount = asMoney(subtotal - safeDiscount + gstTotal)
-      const profit = asMoney(subtotal - safeDiscount - costTotal)
+      const totalDiscount = asMoney(productDiscountTotal + safeDiscount)
+      const totalAmount = asMoney(subtotal - totalDiscount + gstTotal)
+      const profit = asMoney(subtotal - totalDiscount - costTotal)
 
       saleItems.forEach((item, index) => {
         const productRef = productRefs[index]
@@ -198,7 +203,8 @@ app.post('/api/admin/pos/sale', attachUserFromToken, isAdmin, async (req, res) =
         items: saleItems,
         subtotal,
         discountPercent,
-        discount: safeDiscount,
+        productDiscount: productDiscountTotal,
+        discount: totalDiscount,
         gst: gstTotal,
         total: totalAmount,
         cost: costTotal,
@@ -212,7 +218,7 @@ app.post('/api/admin/pos/sale', attachUserFromToken, isAdmin, async (req, res) =
         updatedAt: FieldValue.serverTimestamp(),
       })
 
-      return { billId: billRef.id, billNo, items: saleItems, subtotal, discountPercent, discount: safeDiscount, gst: gstTotal, total: totalAmount, cost: costTotal, profit, margin: totalAmount > 0 ? asMoney((profit / totalAmount) * 100) : 0, paymentMethod }
+      return { billId: billRef.id, billNo, items: saleItems, subtotal, discountPercent, productDiscount: productDiscountTotal, discount: totalDiscount, gst: gstTotal, total: totalAmount, cost: costTotal, profit, margin: totalAmount > 0 ? asMoney((profit / totalAmount) * 100) : 0, paymentMethod }
     })
 
     return res.status(201).json({ success: true, bill: result })
