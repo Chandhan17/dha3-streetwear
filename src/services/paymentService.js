@@ -101,9 +101,13 @@ export const initiatePayment = async ({
             paymentId: response.razorpay_payment_id,
             orderId: response.razorpay_order_id,
             amount: Number(orderData.totalAmount || 0),
+            baseSubtotal: Number(orderData.baseSubtotal || orderData.subtotal || 0),
             subtotal: Number(orderData.subtotal || 0),
             discountPercent: Number(orderData.discountPercent || 0),
+            productDiscountAmount: Number(orderData.productDiscountAmount || 0),
+            orderDiscountAmount: Number(orderData.orderDiscountAmount || 0),
             discountAmount: Number(orderData.discountAmount || 0),
+            products: Array.isArray(orderData.products) ? orderData.products : [],
             orderDocumentId: completed.orderDocumentId || '',
           })
         } catch (error) {
