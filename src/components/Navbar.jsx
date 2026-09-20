@@ -46,10 +46,9 @@ function Navbar({
 
   const navLinks = [
     { label: 'Shop', href: '/#shop' },
-    { label: 'Men', href: '/#shop' },
-    { label: 'New', href: '/#shop' },
+    { label: 'New', href: '/?view=new#shop' },
     { label: 'Collections', href: '/#shop' },
-    { label: 'Sale', href: '/#shop' },
+    { label: 'Sale', href: '/?view=sale#shop' },
   ]
 
   const wrapperClass = overlay
