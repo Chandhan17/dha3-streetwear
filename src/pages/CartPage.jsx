@@ -311,7 +311,55 @@ function CartPage() {
     <div className="min-h-screen bg-canvas text-white">
       <BrandedNotification message={errorMessage} />
       <Navbar />
-      <style>{`@media print { body * { visibility: hidden !important; } #online-bill, #online-bill * { visibility: visible !important; } #online-bill { position: absolute; inset: 0; width: 100%; background: #fff !important; color: #000 !important; box-shadow: none !important; } }`}</style>
+      <style>{`
+        @media print {
+          @page { size: A4 portrait; margin: 10mm; }
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #fff !important;
+          }
+          body * {
+            visibility: hidden !important;
+          }
+          #online-bill-overlay,
+          #online-bill-overlay * {
+            visibility: visible !important;
+          }
+          #online-bill-overlay {
+            position: static !important;
+            inset: auto !important;
+            display: block !important;
+            width: 100% !important;
+            height: auto !important;
+            max-height: none !important;
+            overflow: visible !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            background: #fff !important;
+          }
+          #online-bill {
+            position: static !important;
+            inset: auto !important;
+            width: 100% !important;
+            max-width: none !important;
+            min-height: 0 !important;
+            height: auto !important;
+            margin: 0 auto !important;
+            padding: 8mm !important;
+            border-radius: 0 !important;
+            box-shadow: none !important;
+            color: #000 !important;
+            background: #fff !important;
+            overflow: visible !important;
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+          }
+          .no-print {
+            display: none !important;
+          }
+        }
+      `}</style>
       <main className="mx-auto w-full max-w-[1200px] px-4 pb-16 pt-8 md:px-6 md:pt-12">
         <section className="street-panel overflow-hidden p-5 md:p-7">
           <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.22em] text-white/50">Curated Cart</p><h1 className="mt-2 font-display text-3xl md:text-5xl">Your Cart</h1></div><p className="text-sm text-white/65">{cartCount} item{cartCount === 1 ? '' : 's'} in your bag</p></div>
@@ -344,7 +392,7 @@ function CartPage() {
           </aside>
         </div>
       </main>
-      {onlineBill && <div className="fixed inset-0 z-[200] overflow-y-auto bg-black/80 px-4 py-8 backdrop-blur-sm">
+      {onlineBill && <div id="online-bill-overlay" className="fixed inset-0 z-[200] overflow-y-auto bg-black/80 px-4 py-8 backdrop-blur-sm">
         <div className="mx-auto w-full max-w-2xl">
           <section id="online-bill" className="rounded-3xl bg-white p-6 text-black shadow-2xl md:p-8">
             <div className="flex items-start justify-between gap-4 border-b border-black/10 pb-5">
@@ -381,7 +429,7 @@ function CartPage() {
               {buildFullAddress(onlineBill.customerDetails) && <p className="mt-1">Delivery Address: <span className="font-semibold text-black">{buildFullAddress(onlineBill.customerDetails)}</span></p>}
             </div>
 
-            <div className="mt-6 flex flex-wrap justify-end gap-2">
+            <div className="no-print mt-6 flex flex-wrap justify-end gap-2">
               <button type="button" onClick={() => window.print()} className="rounded-full border border-black/15 px-5 py-2.5 text-sm font-semibold uppercase tracking-[0.1em] text-black">Print Bill</button>
               <button type="button" onClick={handleContinueToWhatsApp} className="rounded-full bg-black px-5 py-2.5 text-sm font-semibold uppercase tracking-[0.1em] text-white">Continue to WhatsApp</button>
               <button type="button" onClick={() => setOnlineBill(null)} className="rounded-full border border-black/15 px-5 py-2.5 text-sm font-semibold uppercase tracking-[0.1em] text-black">Close</button>
