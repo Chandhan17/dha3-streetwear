@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, NavLink, useLocation } from 'react-router-dom'
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import clientConfig from '../config'
 import { useCart } from '../context/CartContext'
 
@@ -12,7 +12,8 @@ function Navbar({
   onSearchChange,
 }) {
   const { cartCount } = useCart()
-  const { pathname } = useLocation()
+  const { pathname, search, hash } = useLocation()
+  const navigate = useNavigate()
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [isScrolled, setIsScrolled] = useState(false)
 
@@ -35,6 +36,14 @@ function Navbar({
     setIsMenuOpen(false)
   }, [pathname])
 
+  useEffect(() => {
+    if (pathname !== '/' || hash !== '#shop') return undefined
+    const timer = window.setTimeout(() => {
+      document.getElementById('shop')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [pathname, search, hash])
+
   const handleBrandClick = () => {
     if (typeof onSearchChange === 'function') {
       onSearchChange('')
@@ -44,11 +53,24 @@ function Navbar({
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
+  const handleNavClick = (event, link) => {
+    event.preventDefault()
+    setIsMenuOpen(false)
+
+    const nextSearch = link.view ? `?view=${encodeURIComponent(link.view)}` : ''
+    const nextHash = '#shop'
+    navigate(`/${nextSearch}${nextHash}`)
+
+    window.setTimeout(() => {
+      document.getElementById('shop')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 0)
+  }
+
   const navLinks = [
-    { label: 'Shop', href: '/#shop' },
-    { label: 'New', href: '/?view=new#shop' },
-    { label: 'Collections', href: '/#shop' },
-    { label: 'Sale', href: '/?view=sale#shop' },
+    { label: 'Shop', href: '/#shop', view: '' },
+    { label: 'New', href: '/?view=new#shop', view: 'new' },
+    { label: 'Collections', href: '/#shop', view: '' },
+    { label: 'Sale', href: '/?view=sale#shop', view: 'sale' },
   ]
 
   const wrapperClass = overlay
@@ -90,6 +112,7 @@ function Navbar({
                 <a
                   key={link.label}
                   href={link.href}
+                  onClick={(event) => handleNavClick(event, link)}
                   className="text-[11px] font-semibold uppercase tracking-[0.22em] text-black/75 transition hover:text-black hover:tracking-[0.24em]"
                 >
                   {link.label}
@@ -183,6 +206,7 @@ function Navbar({
                 <a
                   key={`mobile-${link.label}`}
                   href={link.href}
+                  onClick={(event) => handleNavClick(event, link)}
                   className="text-[11px] font-semibold uppercase tracking-[0.22em] text-black/75 transition hover:text-black"
                 >
                   {link.label}
