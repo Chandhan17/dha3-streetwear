@@ -94,6 +94,8 @@ function CartPage() {
   const [customerDetails, setCustomerDetails] = useState(() => readStoredCustomerDetails())
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [onlineBill, setOnlineBill] = useState(null)
+  const [liveStock, setLiveStock] = useState({})
+  const [isCheckingLiveStock, setIsCheckingLiveStock] = useState(true)
   const clearCartRef = useRef(clearCart)
   const buyNowCleanupTimerRef = useRef(null)
   clearCartRef.current = clearCart
@@ -121,6 +123,61 @@ function CartPage() {
   const formattedTotal = useMemo(() => new Intl.NumberFormat('en-IN').format(money(cartTotal)), [cartTotal])
   const hasItems = items.length > 0
 
+  const refreshLiveStock = async () => {
+    if (!items.length) {
+      setLiveStock({})
+      setIsCheckingLiveStock(false)
+      return
+    }
+
+    try {
+      const products = await fetchProducts({ forceRefresh: true })
+      const productMap = new Map(products.map((product) => [String(product.id), product]))
+      const nextStock = Object.fromEntries(items.map((item) => {
+        const product = productMap.get(String(item.productId))
+        const hasSizes = Array.isArray(product?.sizes) && product.sizes.length > 0
+        const selectedSize = String(item.selectedSize || 'N/A').trim() || 'N/A'
+        const sizeStock = product?.sizeStock && typeof product.sizeStock === 'object' ? product.sizeStock : {}
+        const sizeKey = Object.keys(sizeStock).find((key) => String(key).trim().toLowerCase() === selectedSize.toLowerCase())
+        const available = !product
+          ? false
+          : hasSizes
+            ? Number(sizeKey === undefined ? 0 : sizeStock[sizeKey]) > 0
+            : Number(product.stock ?? 0) > 0
+
+        return [item.cartItemId, {
+          available,
+          stock: Number(product?.stock ?? 0),
+          selectedSize,
+          productFound: Boolean(product),
+        }]
+      }))
+      setLiveStock(nextStock)
+    } catch (error) {
+      console.error('Live cart stock check failed:', error)
+    } finally {
+      setIsCheckingLiveStock(false)
+    }
+  }
+
+  useEffect(() => {
+    refreshLiveStock()
+
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') refreshLiveStock()
+    }
+
+    window.addEventListener('focus', handleVisibilityOrFocus)
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus)
+    const intervalId = window.setInterval(refreshLiveStock, 15000)
+
+    return () => {
+      window.removeEventListener('focus', handleVisibilityOrFocus)
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus)
+      window.clearInterval(intervalId)
+    }
+  }, [items])
+
   const handleInputChange = (event) => {
     const { name, value } = event.target
     setCustomerDetails((currentDetails) => ({ ...currentDetails, [name]: value }))
@@ -134,6 +191,9 @@ function CartPage() {
     }
     return true
   }
+
+  const getCartItemAvailability = (item) => liveStock[item.cartItemId]?.available !== false
+  const hasUnavailableItems = items.some((item) => liveStock[item.cartItemId]?.available === false)
 
   const validateLiveStock = async () => {
     const products = await fetchProducts({ forceRefresh: true })
@@ -258,15 +318,18 @@ function CartPage() {
         </section>
         <div className="mt-8 grid gap-6 lg:grid-cols-[1.35fr_0.85fr]">
           <section className="space-y-4">
-            {!hasItems ? <div className="street-panel p-6 text-center text-white/65">Your cart is empty. Add pieces from the collection to build your order.</div> : items.map((item) => (
+            {!hasItems ? <div className="street-panel p-6 text-center text-white/65">Your cart is empty. Add pieces from the collection to build your order.</div> : items.map((item) => {
+              const isAvailable = getCartItemAvailability(item)
+              return (
               <article key={item.cartItemId} className="street-panel flex flex-col gap-4 p-4 md:flex-row md:items-center">
                 <img src={item.imageUrl || '/dha-logo.png'} alt={item.name} className="h-28 w-full rounded-2xl object-cover md:h-24 md:w-24" loading="lazy" decoding="async" />
                 <div className="min-w-0 flex-1 space-y-2">
-                  <div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0"><h2 className="truncate font-semibold text-white md:text-lg">{item.name}</h2><p className="text-sm text-white/60">{item.category || 'Streetwear'}{item.selectedSize && item.selectedSize !== 'N/A' ? ` · Size ${item.selectedSize}` : ''}</p></div><p className="text-lg font-bold text-white">₹{Number(item.price || 0).toLocaleString('en-IN')}</p></div>
+                  <div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h2 className="truncate font-semibold text-white md:text-lg">{item.name}</h2>{isCheckingLiveStock ? <span className="rounded-full border border-white/10 px-2 py-1 text-[10px] uppercase tracking-[0.1em] text-white/40">Checking stock...</span> : !isAvailable ? <span className="rounded-full bg-red-500/15 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-red-300">Out of stock</span> : null}</div><p className="text-sm text-white/60">{item.category || 'Streetwear'}{item.selectedSize && item.selectedSize !== 'N/A' ? ` · Size ${item.selectedSize}` : ''}</p>{!isAvailable && <p className="text-xs font-medium text-red-300">This item is no longer available in the selected size. Remove it from the cart to continue.</p>}</div><p className="text-lg font-bold text-white">₹{Number(item.price || 0).toLocaleString('en-IN')}</p></div>
                   <div className="flex flex-wrap items-center gap-3"><div className="inline-flex items-center overflow-hidden rounded-full border border-white/15"><button type="button" onClick={() => updateQuantity(item.cartItemId, item.quantity - 1)} className="px-3 py-1.5 text-sm text-white/75 transition hover:bg-white/10">-</button><span className="min-w-10 px-3 py-1.5 text-center text-sm font-semibold text-white">{item.quantity}</span><button type="button" onClick={() => updateQuantity(item.cartItemId, item.quantity + 1)} className="px-3 py-1.5 text-sm text-white/75 transition hover:bg-white/10">+</button></div><button type="button" onClick={() => removeFromCart(item.cartItemId)} className="rounded-full border border-white/15 px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-white/75 transition hover:border-white/35 hover:bg-white/5">Remove</button></div>
                 </div>
               </article>
-            ))}
+              )
+            })}
           </section>
           <aside className="space-y-4">
             <section className="street-panel p-5 md:p-6"><h2 className="font-display text-2xl">Checkout</h2><div className="mt-4 space-y-3">{['name', 'phone', 'doorNo', 'street', 'city', 'pincode', 'state'].map((field) => <input key={field} name={field} value={customerDetails[field]} onChange={handleInputChange} placeholder={field === 'doorNo' ? 'Door No' : field.charAt(0).toUpperCase() + field.slice(1)} disabled={isSubmitting} className="w-full rounded-2xl border border-white/10 bg-black/60 px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-white/30" />)}<textarea name="notes" value={customerDetails.notes} onChange={handleInputChange} rows={3} placeholder="Notes (optional)" disabled={isSubmitting} className="w-full rounded-2xl border border-white/10 bg-black/60 px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/35 focus:border-white/30" /></div></section>
@@ -274,7 +337,8 @@ function CartPage() {
               <div className="flex items-center justify-between text-sm text-white/65"><span>Subtotal</span><span>₹{formattedTotal}</span></div>
               <div className="mt-2 flex items-center justify-between text-base font-semibold text-white"><span>Total</span><span>₹{formattedTotal}</span></div>
               <p className="mt-3 text-xs text-white/45">Online orders require 100% payment through Razorpay. Paid orders are then forwarded to WhatsApp for store confirmation.</p>
-              <button type="button" onClick={handleRazorpayCheckout} disabled={!hasItems || isSubmitting} className="mt-5 w-full rounded-full border border-white/20 bg-white px-4 py-3 text-sm font-semibold uppercase tracking-[0.14em] text-black transition hover:-translate-y-0.5 hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50">{isSubmitting ? 'Processing Payment...' : 'Pay 100% with Razorpay'}</button>
+              {hasUnavailableItems && <p className="mt-3 rounded-xl border border-red-400/20 bg-red-500/10 px-3 py-2 text-xs font-medium text-red-200">One or more items became out of stock after being added to your cart. Remove those items before completing the purchase.</p>}
+              <button type="button" onClick={handleRazorpayCheckout} disabled={!hasItems || isSubmitting || isCheckingLiveStock || hasUnavailableItems} className="mt-5 w-full rounded-full border border-white/20 bg-white px-4 py-3 text-sm font-semibold uppercase tracking-[0.14em] text-black transition hover:-translate-y-0.5 hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50">{isSubmitting ? 'Processing Payment...' : isCheckingLiveStock ? 'Checking Stock...' : hasUnavailableItems ? 'Remove Out-of-Stock Items' : 'Pay 100% with Razorpay'}</button>
               <button type="button" onClick={clearCart} disabled={!hasItems || isSubmitting} className="mt-3 w-full rounded-full border border-white/15 px-4 py-3 text-sm font-semibold uppercase tracking-[0.14em] text-white/70 transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50">Clear Cart</button>
             </section>
           </aside>
