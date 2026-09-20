@@ -171,7 +171,7 @@ function ProductDetails() {
     <div className="min-h-screen">
       <BrandedNotification message={errorMessage} />
       <Navbar />
-      <main className="mx-auto w-full max-w-[1200px] space-y-8 px-4 pb-16 pt-8 md:px-6 md:pt-12">
+      <main className="mx-auto w-full max-w-[1200px] space-y-8 px-4 pb-16 pt-24 md:px-6 md:pt-28">
         {isLoading && <section className="grid gap-6 md:grid-cols-2"><div className="luxury-panel h-96 animate-pulse bg-white/10" /><div className="luxury-panel h-96 animate-pulse bg-white/10" /></section>}
         {!isLoading && pageError && <div className="luxury-panel px-4 py-10 text-center text-sm text-red-300">{pageError}</div>}
         {!isLoading && product && (
