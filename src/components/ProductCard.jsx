@@ -34,7 +34,7 @@ function isWithinNewArrivalWindow(createdAt) {
   return ageMs >= 0 && ageMs < 7 * 24 * 60 * 60 * 1000
 }
 
-function ProductCard({ product, showNewTag = false, discountLabel = '', onBuyNowClick, onError }) {
+function ProductCard({ product, onBuyNowClick, onError }) {
   const navigate = useNavigate()
   const { addToCart } = useCart()
   const [selectedSize, setSelectedSize] = useState('')
