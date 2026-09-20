@@ -89,7 +89,11 @@ function ProductDetails() {
     if (imageList.length > 0 && (!selectedImage || !imageList.includes(selectedImage))) setSelectedImage(imageList[0])
   }, [imageList, selectedImage])
 
-  const formattedPrice = useMemo(() => new Intl.NumberFormat('en-IN').format(Number(product?.price || 0)), [product?.price])
+  const originalPrice = Number(product?.price || 0)
+  const discountPercent = Math.min(100, Math.max(0, Number(product?.discountPercent || 0)))
+  const effectivePrice = Number(product?.effectivePrice ?? originalPrice)
+  const formattedPrice = new Intl.NumberFormat('en-IN').format(effectivePrice)
+  const formattedOriginalPrice = new Intl.NumberFormat('en-IN').format(originalPrice)
   const descriptionText = (product?.description || '').trim()
   const productName = String(product?.name || 'Product').trim() || 'Product'
   const categoryName = String(product?.category || 'Uncategorized').trim() || 'Uncategorized'
@@ -177,7 +181,7 @@ function ProductDetails() {
               <div className="luxury-panel space-y-5 p-5 md:p-7">
                 <p className="chip w-fit border-white/10 bg-white/[0.06] text-[0.62rem] text-white/75">{categoryName}</p>
                 <h1 className="font-display text-3xl leading-tight text-white md:text-4xl">{productName}</h1>
-                <p className="text-3xl font-bold text-accent">Rs. {formattedPrice}</p>
+                <div className="flex items-end gap-3"><p className="text-3xl font-bold text-accent">Rs. {formattedPrice}</p>{discountPercent > 0 && <><span className="text-base text-white/40 line-through">Rs. {formattedOriginalPrice}</span><span className="chip border-white/10 bg-white text-black">{discountPercent}% OFF</span></>}</div>
                 <p className="text-sm leading-relaxed text-white/70">{descriptionText || 'No product description available'}</p>
                 {isOutOfStock ? (
                   <div className="rounded-xl border border-red-400/30 bg-red-400/10 px-4 py-3 text-sm font-semibold text-red-200">Out of Stock</div>
