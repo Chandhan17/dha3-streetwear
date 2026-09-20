@@ -7,6 +7,13 @@ function getApiUrl() {
   return API_URL
 }
 
+function createReservationToken() {
+  try {
+    if (window.crypto?.randomUUID) return window.crypto.randomUUID()
+  } catch { /* Ignore crypto access failures. */ }
+  return 'checkout_' + Date.now() + '_' + Math.random().toString(36).slice(2)
+}
+
 async function post(path, body) {
   const endpoint = `${getApiUrl()}${path}`
   try {
@@ -40,6 +47,16 @@ export const validateOnlineStock = async (items) => {
   return post('/api/online/check-stock', { items: normalizedItems })
 }
 
+export const releaseOnlineReservations = async (reservationToken, reservationKeys) => {
+  if (!reservationToken || !Array.isArray(reservationKeys) || reservationKeys.length === 0) return { success: true }
+  return post('/api/online/release-reservations', { reservationToken, reservationKeys })
+}
+
+export const confirmOnlineReservation = async (orderId) => {
+  if (!orderId) throw new Error('orderId is required')
+  return post('/api/online/confirm-reservation', { orderId })
+}
+
 export const initiatePayment = async ({
   productId,
   quantity = 1,
@@ -55,6 +72,19 @@ export const initiatePayment = async ({
   onSuccess,
   onFailure,
 }) => {
+  const reservationToken = createReservationToken()
+  let reservationKeys = []
+  let paymentModalOpened = false
+
+  const releaseCurrentReservations = async () => {
+    if (!reservationKeys.length) return
+    try {
+      await releaseOnlineReservations(reservationToken, reservationKeys)
+    } catch (releaseError) {
+      console.error('Checkout reservation release failed:', releaseError)
+    }
+  }
+
   try {
     if (!customerName || !customerPhone) throw new Error('Customer name and phone are required')
 
@@ -69,7 +99,6 @@ export const initiatePayment = async ({
         : []
 
     if (!finalItems.length) throw new Error('Product details are required to create payment order')
-
     await validateOnlineStock(finalItems)
 
     const orderData = await post('/api/online/create-payment-order', {
@@ -78,7 +107,9 @@ export const initiatePayment = async ({
       customerDetails,
       currency: 'INR',
       discountPercent: Number(discountPercent || 0),
+      reservationToken,
     })
+    reservationKeys = Array.isArray(orderData.reservationKeys) ? orderData.reservationKeys : []
 
     if (!window.Razorpay) throw new Error('Razorpay script not loaded. Please refresh the page.')
 
@@ -96,6 +127,7 @@ export const initiatePayment = async ({
       handler: async (response) => {
         try {
           await verifyPayment(response.razorpay_order_id, response.razorpay_payment_id, response.razorpay_signature)
+          await confirmOnlineReservation(response.razorpay_order_id)
           const completed = await post('/api/online/complete-order', { orderId: response.razorpay_order_id, orderStatus: 'processing' })
           onSuccess?.({
             paymentId: response.razorpay_payment_id,
@@ -115,11 +147,18 @@ export const initiatePayment = async ({
           onFailure?.(error)
         }
       },
-      modal: { ondismiss: () => onFailure?.(new Error('Payment modal closed')) },
+      modal: {
+        ondismiss: async () => {
+          await releaseCurrentReservations()
+          onFailure?.(new Error('Payment modal closed'))
+        },
+      },
     }
 
+    paymentModalOpened = true
     new window.Razorpay(options).open()
   } catch (error) {
+    if (!paymentModalOpened) await releaseCurrentReservations()
     console.error('Online payment initiation failed:', error)
     onFailure?.(error)
   }
@@ -127,4 +166,4 @@ export const initiatePayment = async ({
 
 export const storeOrderData = async (orderData) => post('/api/store-order', orderData)
 
-export default { createOrder, verifyPayment, storeVerifiedOrder, validateOnlineStock, initiatePayment, storeOrderData }
+export default { createOrder, verifyPayment, storeVerifiedOrder, validateOnlineStock, initiatePayment, releaseOnlineReservations, confirmOnlineReservation, storeOrderData }
