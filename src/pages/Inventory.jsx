@@ -14,7 +14,10 @@ const escapeHtml = (value) => String(value ?? '').replace(/[&<>\"]/g, (character
 function printBarcodeLabels(product, quantity) {
   const barcode = String(product.barcode || '').trim()
   const labelCount = Number(quantity)
-  if (!barcode || !Number.isInteger(labelCount) || labelCount < 1 || labelCount > 1000) return
+
+  if (!barcode || !Number.isInteger(labelCount) || labelCount < 1 || labelCount > 1000) {
+    return { success: false, message: 'Invalid barcode or label quantity.' }
+  }
 
   const svg = barcodeSvg(barcode, { width: 300, height: 105 })
   const labels = Array.from({ length: labelCount }, () => `
@@ -25,21 +28,100 @@ function printBarcodeLabels(product, quantity) {
     </div>
   `).join('')
 
-  const printWindow = window.open('', '_blank', 'width=600,height=700')
-  if (!printWindow) return
-  printWindow.document.write(`<!doctype html><html><head><title>Barcode Labels - ${escapeHtml(product.name)}</title><style>
-    @page { size: auto; margin: 0; }
+  const iframe = document.createElement('iframe')
+  iframe.setAttribute('aria-hidden', 'true')
+  iframe.style.position = 'fixed'
+  iframe.style.width = '1px'
+  iframe.style.height = '1px'
+  iframe.style.border = '0'
+  iframe.style.opacity = '0'
+  iframe.style.pointerEvents = 'none'
+  iframe.style.left = '-10000px'
+  iframe.style.top = '0'
+  document.body.appendChild(iframe)
+
+  const cleanup = () => {
+    window.setTimeout(() => {
+      iframe.remove()
+    }, 500)
+  }
+
+  try {
+    const printDocument = iframe.contentDocument
+    if (!printDocument || !iframe.contentWindow) {
+      cleanup()
+      return { success: false, message: 'Unable to open the print preview.' }
+    }
+
+    printDocument.open()
+    printDocument.write(`<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Barcode Labels - ${escapeHtml(product.name)}</title>
+  <style>
+    @page { size: 58mm 32mm; margin: 0; }
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; background: #fff; }
     body { font-family: Arial, sans-serif; }
-    .label { width: 58mm; min-height: 32mm; padding: 2.5mm 3mm; display: flex; flex-direction: column; align-items: center; justify-content: center; page-break-after: always; break-after: page; overflow: hidden; }
-    .label:last-child { page-break-after: auto; break-after: auto; }
-    .name { width: 100%; font-size: 11px; line-height: 1.2; font-weight: 700; text-align: center; margin-bottom: 1mm; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    svg { width: 100%; max-width: 52mm; height: auto; display: block; }
-    .price { font-size: 10px; line-height: 1.1; font-weight: 700; margin-top: 0.5mm; }
-    @media screen { body { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px; } .label { border: 1px dashed #aaa; page-break-after: auto; } }
-  </style></head><body>${labels}<script>window.onload=()=>{window.print();window.onafterprint=()=>window.close()}</script></body></html>`)
-  printWindow.document.close()
+    .label {
+      width: 58mm;
+      height: 32mm;
+      padding: 2.5mm 3mm;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      page-break-after: always;
+      break-after: page;
+      overflow: hidden;
+      color: #000;
+      background: #fff;
+    }
+    .label:last-child {
+      page-break-after: auto;
+      break-after: auto;
+    }
+    .name {
+      width: 100%;
+      font-size: 11px;
+      line-height: 1.2;
+      font-weight: 700;
+      text-align: center;
+      margin-bottom: 1mm;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    svg {
+      width: 52mm;
+      max-width: 52mm;
+      height: auto;
+      display: block;
+    }
+    .price {
+      font-size: 10px;
+      line-height: 1.1;
+      font-weight: 700;
+      margin-top: 0.5mm;
+    }
+  </style>
+</head>
+<body>
+  ${labels}
+</body>
+</html>`)
+    printDocument.close()
+
+    iframe.contentWindow.focus()
+    iframe.contentWindow.print()
+    cleanup()
+    return { success: true }
+  } catch (error) {
+    console.error('Barcode label print failed:', error)
+    cleanup()
+    return { success: false, message: 'Unable to open the print dialog. Please allow printing for this site.' }
+  }
 }
 
 function Inventory() {
@@ -187,7 +269,10 @@ function Inventory() {
       setMessage('This product does not have a barcode yet. Edit/save the product first.')
       return
     }
-    printBarcodeLabels(product, quantity)
+    const result = printBarcodeLabels(product, quantity)
+    if (!result.success) {
+      setMessage(result.message)
+    }
   }
 
   const handleNavigation = (key) => {
