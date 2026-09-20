@@ -44,6 +44,19 @@ export async function adjustInventory({ productId, quantity, reason = 'manual_ad
   })
 }
 
+export async function restockInventory({ productId, quantity = 0, sizes = [], notes = '', reason = 'Stock restock' }) {
+  if (!productId) throw new Error('Product id is required.')
+  const normalizedQuantity = Number(quantity)
+  const normalizedSizes = Array.isArray(sizes) ? sizes.map((size) => String(size || '').trim()).filter(Boolean) : []
+  if (normalizedSizes.length === 0 && (!Number.isInteger(normalizedQuantity) || normalizedQuantity <= 0)) {
+    throw new Error('Enter a positive quantity or select at least one size.')
+  }
+  return request('/api/admin/inventory/restock', {
+    method: 'POST',
+    body: JSON.stringify({ productId, quantity: normalizedQuantity, sizes: [...new Set(normalizedSizes)], notes: String(notes || '').trim(), reason }),
+  })
+}
+
 export async function getInventoryTransactions({ productId = '', limit = 100 } = {}) {
   const query = new URLSearchParams()
 
