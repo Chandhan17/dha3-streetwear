@@ -117,7 +117,9 @@ async function buildDiscountedPaymentIntent(items, discountPercent) {
     const requested = items[index]
     if (!snapshot.exists) throw new Error(`Product not found: ${requested.productId}`)
     const product = snapshot.data() || {}
-    const unitPrice = money(product.price ?? product.salePrice)
+    const baseUnitPrice = money(product.price ?? product.salePrice)
+    const productDiscountPercent = normalizeDiscountPercent(product.discountPercent ?? product.discount ?? 0)
+    const unitPrice = money(baseUnitPrice * (1 - productDiscountPercent / 100))
     const stock = Number(product.stock ?? product.openingStock ?? 0)
     if (unitPrice <= 0) throw new Error(`Invalid sale price for ${String(product.name || requested.productId)}`)
     validateRequestedSize(product, requested)
@@ -130,16 +132,21 @@ async function buildDiscountedPaymentIntent(items, discountPercent) {
       imageUrl: String(product.imageUrl || product.image || '').trim(),
       selectedSize: normalizeSelectedSize(matchedSize || requested.selectedSize) || 'N/A',
       quantity: requested.quantity,
+      baseUnitPrice,
+      productDiscountPercent,
       unitPrice,
       lineTotal: money(unitPrice * requested.quantity),
     }
   })
+  const baseSubtotal = money(products.reduce((sum, item) => sum + item.baseUnitPrice * item.quantity, 0))
   const subtotal = money(products.reduce((sum, item) => sum + item.lineTotal, 0))
+  const productDiscountAmount = money(baseSubtotal - subtotal)
   const safeDiscountPercent = normalizeDiscountPercent(discountPercent)
-  const discountAmount = money(Math.min(subtotal, subtotal * safeDiscountPercent / 100))
-  const totalAmount = money(subtotal - discountAmount)
+  const orderDiscountAmount = money(Math.min(subtotal, subtotal * safeDiscountPercent / 100))
+  const discountAmount = money(productDiscountAmount + orderDiscountAmount)
+  const totalAmount = money(subtotal - orderDiscountAmount)
   if (subtotal <= 0 || totalAmount <= 0) throw new Error('Calculated amount is invalid')
-  return { products, subtotal, discountPercent: safeDiscountPercent, discountAmount, totalAmount }
+  return { products, baseSubtotal, subtotal, discountPercent: safeDiscountPercent, productDiscountAmount, orderDiscountAmount, discountAmount, totalAmount }
 }
 
 app.post('/api/online/create-payment-order', async (req, res) => {
@@ -154,12 +161,12 @@ app.post('/api/online/create-payment-order', async (req, res) => {
     const currency = String(req.body?.currency || 'INR').trim() || 'INR'
     const userId = String(req.body?.userId || 'guest').trim() || 'guest'
     const customerDetails = req.body?.customerDetails && typeof req.body.customerDetails === 'object' ? req.body.customerDetails : {}
-    const { products, subtotal, discountPercent, discountAmount, totalAmount } = await buildDiscountedPaymentIntent(items, req.body?.discountPercent)
+    const { products, baseSubtotal, subtotal, discountPercent, productDiscountAmount, orderDiscountAmount, discountAmount, totalAmount } = await buildDiscountedPaymentIntent(items, req.body?.discountPercent)
     const order = await razorpay.orders.create({ amount: Math.round(totalAmount * 100), currency, receipt: `receipt_${Date.now()}`, notes: { itemCount: String(products.length), discountPercent: String(discountPercent) } })
 
-    await firestore.collection(PAYMENT_INTENT_COLLECTION).doc(order.id).set({ userId, products, subtotal, discountPercent, discountAmount, totalAmount, currency, customerDetails, verified: false, stored: false, createdAt: FieldValue.serverTimestamp() })
+    await firestore.collection(PAYMENT_INTENT_COLLECTION).doc(order.id).set({ userId, products, baseSubtotal, subtotal, discountPercent, productDiscountAmount, orderDiscountAmount, discountAmount, totalAmount, currency, customerDetails, verified: false, stored: false, createdAt: FieldValue.serverTimestamp() })
 
-    return res.json({ success: true, orderId: order.id, amount: order.amount, currency: order.currency, subtotal, discountPercent, discountAmount, totalAmount, products })
+    return res.json({ success: true, orderId: order.id, amount: order.amount, currency: order.currency, baseSubtotal, subtotal, discountPercent, productDiscountAmount, orderDiscountAmount, discountAmount, totalAmount, products })
   } catch (error) {
     console.error('Online payment order creation error:', error)
     const message = String(error?.message || '')
@@ -285,7 +292,7 @@ app.post('/api/online/complete-order', async (req, res) => {
       const discountPercent = normalizeDiscountPercent(intent.discountPercent)
       const subtotal = money(intent.subtotal || (totalAmount + discountAmount))
       const profit = money(totalAmount - totalCost)
-      transaction.set(orderRef, { userId: String(intent.userId || 'guest').trim() || 'guest', products, subtotal, discountPercent, discountAmount, totalAmount, currency: String(intent.currency || 'INR').trim() || 'INR', paymentId: String(intent.paymentId), paymentOrderId, paymentStatus: 'paid', paymentMethod: 'razorpay', orderStatus: requestedStatus, customerDetails: intent.customerDetails || {}, cost: money(totalCost), profit, margin: totalAmount > 0 ? money((profit / totalAmount) * 100) : 0, inventoryProcessed: true, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() })
+      transaction.set(orderRef, { userId: String(intent.userId || 'guest').trim() || 'guest', products, baseSubtotal: money(intent.baseSubtotal ?? subtotal), subtotal, discountPercent, productDiscountAmount: money(intent.productDiscountAmount), orderDiscountAmount: money(intent.orderDiscountAmount), discountAmount, totalAmount, currency: String(intent.currency || 'INR').trim() || 'INR', paymentId: String(intent.paymentId), paymentOrderId, paymentStatus: 'paid', paymentMethod: 'razorpay', orderStatus: requestedStatus, customerDetails: intent.customerDetails || {}, cost: money(totalCost), profit, margin: totalAmount > 0 ? money((profit / totalAmount) * 100) : 0, inventoryProcessed: true, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() })
       transaction.set(intentRef, { stored: true, inventoryProcessed: true, orderDocumentId: orderRef.id, completedAt: FieldValue.serverTimestamp() }, { merge: true })
       return { orderDocumentId: orderRef.id, totalAmount, cost: money(totalCost), profit, subtotal, discountPercent, discountAmount }
     })
