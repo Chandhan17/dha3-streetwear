@@ -88,6 +88,95 @@ function openWhatsAppOrderMessage({ customerDetails, items, orderId, paymentId, 
   window.location.href = whatsappUrl
 }
 
+function printOnlineBill(bill) {
+  if (!bill) return
+
+  const printWindow = window.open('', '_blank', 'width=800,height=900')
+  if (!printWindow) {
+    window.alert('Please allow pop-ups for this site to print the invoice.')
+    return
+  }
+
+  const escapeHtml = (value) => String(value ?? '')
+    .replace(/[&<>"']/g, (character) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;',
+    }[character]))
+
+  const customer = bill.customerDetails || {}
+  const itemsHtml = (bill.items || []).map((item) => `
+    <div class="item">
+      <div>
+        <div class="item-name">${escapeHtml(item.name || 'Product')}</div>
+        <div class="muted">${item.selectedSize && item.selectedSize !== 'N/A' ? `Size ${escapeHtml(item.selectedSize)} · ` : ''}Qty ${Number(item.quantity || 0)}</div>
+      </div>
+      <div class="item-price">₹${money(Number(item.price || 0) * Number(item.quantity || 0)).toLocaleString('en-IN')}</div>
+    </div>
+  `).join('')
+
+  const productDiscount = Number(bill.productDiscountAmount || 0)
+  const orderDiscount = Number(bill.orderDiscountAmount || 0)
+  const address = buildFullAddress(customer)
+
+  printWindow.document.open()
+  printWindow.document.write(`<!doctype html><html><head>
+  <meta charset="utf-8">
+  <title>Online Invoice - ${escapeHtml(bill.billNo)}</title>
+  <style>
+    @page { size: A4 portrait; margin: 12mm; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: #fff; color: #111; }
+    body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; line-height: 1.35; }
+    .invoice { width: 100%; max-width: 180mm; margin: 0 auto; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid #ddd; padding-bottom: 10px; }
+    .eyebrow { font-size: 8px; letter-spacing: 2px; text-transform: uppercase; color: #777; font-weight: 700; }
+    .brand { margin-top: 3px; font-size: 20px; font-weight: 800; }
+    .billno { margin-top: 3px; color: #666; font-size: 9px; }
+    .paid { padding: 4px 9px; border-radius: 999px; background: #e8f7ec; color: #17753b; font-weight: 800; font-size: 8px; letter-spacing: 1px; text-transform: uppercase; }
+    .details { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; padding: 12px 0; }
+    .label { color: #888; font-size: 8px; text-transform: uppercase; letter-spacing: 1.2px; font-weight: 700; }
+    .value { margin-top: 3px; font-size: 10px; font-weight: 700; }
+    .muted { color: #666; font-size: 9px; }
+    .right { text-align: right; }
+    .items { border: 1px solid #ddd; border-radius: 8px; overflow: hidden; }
+    .item { display: flex; justify-content: space-between; gap: 16px; padding: 10px 12px; border-bottom: 1px solid #eee; }
+    .item:last-child { border-bottom: 0; }
+    .item-name { font-weight: 700; font-size: 10px; }
+    .item-price { font-weight: 700; font-size: 10px; white-space: nowrap; }
+    .summary { width: 62%; margin-left: auto; margin-top: 14px; font-size: 10px; }
+    .row { display: flex; justify-content: space-between; padding: 3px 0; }
+    .discount { color: #16823c; }
+    .total { margin-top: 5px; padding-top: 8px; border-top: 1px solid #ddd; font-size: 14px; font-weight: 800; }
+    .meta { margin-top: 14px; padding: 9px 11px; border-radius: 8px; background: #f6f6f6; color: #555; font-size: 8.5px; }
+    .meta strong { color: #111; }
+  </style></head><body>
+  <div class="invoice">
+    <div class="header"><div><div class="eyebrow">Online Invoice</div><div class="brand">DHA THREE STREETWEAR</div><div class="billno">Bill No: ${escapeHtml(bill.billNo)}</div></div><div class="paid">Paid</div></div>
+    <div class="details">
+      <div><div class="label">Customer</div><div class="value">${escapeHtml(formatCustomerField(customer.name))}</div><div class="muted">${escapeHtml(formatCustomerField(customer.phone))}</div></div>
+      <div class="right"><div class="label">Order Date</div><div class="value">${escapeHtml(new Date(bill.createdAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }))}</div><div class="muted">Payment: Razorpay</div></div>
+    </div>
+    <div class="items">${itemsHtml}</div>
+    <div class="summary">
+      <div class="row"><span>Original Subtotal</span><span>₹${money(bill.baseSubtotal).toLocaleString('en-IN')}</span></div>
+      ${productDiscount > 0 ? `<div class="row discount"><span>Product Discount</span><span>-₹${money(productDiscount).toLocaleString('en-IN')}</span></div>` : ''}
+      ${orderDiscount > 0 ? `<div class="row discount"><span>Order Discount</span><span>-₹${money(orderDiscount).toLocaleString('en-IN')}</span></div>` : ''}
+      <div class="row total"><span>Total Paid</span><span>₹${money(bill.amount).toLocaleString('en-IN')}</span></div>
+    </div>
+    <div class="meta">
+      <div>Order ID: <strong>${escapeHtml(bill.orderId)}</strong></div>
+      <div>Payment ID: <strong>${escapeHtml(bill.paymentId)}</strong></div>
+      ${address ? `<div>Delivery Address: <strong>${escapeHtml(address)}</strong></div>` : ''}
+    </div>
+  </div>
+  <script>
+    window.onload = function () {
+      setTimeout(function () { window.print(); }, 200);
+      window.onafterprint = function () { window.close(); };
+    };
+  </script></body></html>`)
+  printWindow.document.close()
+}
+
 function CartPage() {
   const { items, cartCount, cartTotal, updateQuantity, removeFromCart, clearCart } = useCart()
   const { errorMessage, showError, clearError } = useBrandedNotification()
@@ -311,55 +400,7 @@ function CartPage() {
     <div className="min-h-screen bg-canvas text-white">
       <BrandedNotification message={errorMessage} />
       <Navbar />
-      <style>{`
-        @media print {
-          @page { size: A4 portrait; margin: 10mm; }
-          html, body {
-            margin: 0 !important;
-            padding: 0 !important;
-            background: #fff !important;
-          }
-          body * {
-            visibility: hidden !important;
-          }
-          #online-bill-overlay,
-          #online-bill-overlay * {
-            visibility: visible !important;
-          }
-          #online-bill-overlay {
-            position: static !important;
-            inset: auto !important;
-            display: block !important;
-            width: 100% !important;
-            height: auto !important;
-            max-height: none !important;
-            overflow: visible !important;
-            padding: 0 !important;
-            margin: 0 !important;
-            background: #fff !important;
-          }
-          #online-bill {
-            position: static !important;
-            inset: auto !important;
-            width: 100% !important;
-            max-width: none !important;
-            min-height: 0 !important;
-            height: auto !important;
-            margin: 0 auto !important;
-            padding: 8mm !important;
-            border-radius: 0 !important;
-            box-shadow: none !important;
-            color: #000 !important;
-            background: #fff !important;
-            overflow: visible !important;
-            break-inside: avoid !important;
-            page-break-inside: avoid !important;
-          }
-          .no-print {
-            display: none !important;
-          }
-        }
-      `}</style>
+      
       <main className="mx-auto w-full max-w-[1200px] px-4 pb-16 pt-8 md:px-6 md:pt-12">
         <section className="street-panel overflow-hidden p-5 md:p-7">
           <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.22em] text-white/50">Curated Cart</p><h1 className="mt-2 font-display text-3xl md:text-5xl">Your Cart</h1></div><p className="text-sm text-white/65">{cartCount} item{cartCount === 1 ? '' : 's'} in your bag</p></div>
@@ -430,7 +471,7 @@ function CartPage() {
             </div>
 
             <div className="no-print mt-6 flex flex-wrap justify-end gap-2">
-              <button type="button" onClick={() => window.print()} className="rounded-full border border-black/15 px-5 py-2.5 text-sm font-semibold uppercase tracking-[0.1em] text-black">Print Bill</button>
+              <button type="button" onClick={() => printOnlineBill(onlineBill)} className="rounded-full border border-black/15 px-5 py-2.5 text-sm font-semibold uppercase tracking-[0.1em] text-black">Print Bill</button>
               <button type="button" onClick={handleContinueToWhatsApp} className="rounded-full bg-black px-5 py-2.5 text-sm font-semibold uppercase tracking-[0.1em] text-white">Continue to WhatsApp</button>
               <button type="button" onClick={() => setOnlineBill(null)} className="rounded-full border border-black/15 px-5 py-2.5 text-sm font-semibold uppercase tracking-[0.1em] text-black">Close</button>
             </div>
