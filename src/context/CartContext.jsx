@@ -78,7 +78,7 @@ export function CartProvider({ children }) {
           cartItemId,
           productId,
           name: productName,
-          price: Number(product?.price || 0),
+          price: Number(product?.effectivePrice ?? product?.price ?? 0),
           imageUrl: String(product?.imageUrl || product?.image || product?.images?.[0] || '').trim(),
           category: String(product?.category || '').trim(),
           selectedSize,
