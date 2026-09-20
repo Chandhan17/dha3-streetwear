@@ -1,7 +1,8 @@
+import { randomUUID } from 'crypto'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { getApps } from 'firebase-admin/app'
-import { FieldValue, getFirestore } from 'firebase-admin/firestore'
+import { FieldValue, Timestamp, getFirestore } from 'firebase-admin/firestore'
 import './server-pos.js'
 import { app, getRuntimeDependencies } from './server.js'
 
@@ -9,9 +10,104 @@ const PRODUCT_COLLECTION = 'products'
 const ORDER_COLLECTION = 'orders'
 const PAYMENT_INTENT_COLLECTION = 'paymentIntents'
 const INVENTORY_TRANSACTION_COLLECTION = 'inventory_transactions'
+const ONLINE_RESERVATION_COLLECTION = 'online_reservations'
+const ONLINE_RESERVATION_TTL_MS = 15 * 60 * 1000
 
 const firestore = getApps().length > 0 ? getFirestore(getApps()[0]) : null
 
+function reservationDocumentId(productId, selectedSize) {
+  return encodeURIComponent(String(productId) + '::' + String(selectedSize))
+}
+
+function reservationExpiresAt() {
+  return Timestamp.fromMillis(Date.now() + ONLINE_RESERVATION_TTL_MS)
+}
+
+function getTimestampMillis(value) {
+  if (!value) return 0
+  if (typeof value.toMillis === 'function') return value.toMillis()
+  const parsed = new Date(value).getTime()
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+async function reserveOnlineSizeStock(items, reservationToken) {
+  if (!firestore) throw new Error('Server not configured')
+  const token = String(reservationToken || '').trim()
+  if (!token) throw new Error('Checkout reservation token is required')
+  const sizedItems = items.filter((item) => String(item.selectedSize || 'N/A').trim() !== 'N/A')
+  if (!sizedItems.length) return { reservationKeys: [], expiresAt: null }
+  const productRefs = sizedItems.map((item) => firestore.collection(PRODUCT_COLLECTION).doc(item.productId))
+  const reservationRefs = sizedItems.map((item) => firestore.collection(ONLINE_RESERVATION_COLLECTION).doc(reservationDocumentId(item.productId, item.selectedSize)))
+  const expiresAt = reservationExpiresAt()
+  return firestore.runTransaction(async (transaction) => {
+    const productSnapshots = await Promise.all(productRefs.map((ref) => transaction.get(ref)))
+    const reservationSnapshots = await Promise.all(reservationRefs.map((ref) => transaction.get(ref)))
+    const reservationKeys = []
+    productSnapshots.forEach((snapshot, index) => {
+      const requested = sizedItems[index]
+      if (!snapshot.exists) throw new Error('Product not found: ' + requested.productId)
+      const product = snapshot.data() || {}
+      const sizes = getSizeLabels(product)
+      const matchedSize = findMatchedSize(sizes, requested.selectedSize)
+      if (!matchedSize) throw new Error('Please select a valid size for ' + String(product.name || requested.productId))
+      const sizeStock = getSizeStock(product)
+      const stockKey = Object.keys(sizeStock).find((key) => sameSize(key, matchedSize))
+      const available = Number(stockKey === undefined ? 0 : sizeStock[stockKey])
+      if (available <= 0) throw new Error('Size ' + matchedSize + ' is sold out for ' + String(product.name || requested.productId))
+      if (requested.quantity > 1) throw new Error('Only 1 unit of size ' + matchedSize + ' is available for ' + String(product.name || requested.productId))
+      const reservationSnapshot = reservationSnapshots[index]
+      const reservationData = reservationSnapshot.exists ? reservationSnapshot.data() || {} : {}
+      const activeUntil = getTimestampMillis(reservationData.expiresAt)
+      if (reservationSnapshot.exists && activeUntil > Date.now() && String(reservationData.reservationToken || '') !== token) {
+        throw new Error('Size ' + matchedSize + ' of ' + String(product.name || requested.productId) + ' is currently being purchased by another customer. Please try again shortly.')
+      }
+      transaction.set(reservationRefs[index], { productId: requested.productId, selectedSize: matchedSize, reservationToken: token, reservedAt: FieldValue.serverTimestamp(), expiresAt, verified: false, paymentOrderId: '' })
+      reservationKeys.push(requested.productId + '::' + matchedSize)
+    })
+    return { reservationKeys, expiresAt: expiresAt.toDate().toISOString() }
+  })
+}
+
+async function releaseOnlineReservations(reservationKeys, reservationToken) {
+  if (!firestore) return
+  const token = String(reservationToken || '').trim()
+  if (!token || !Array.isArray(reservationKeys) || reservationKeys.length === 0) return
+  const refs = reservationKeys.map((key) => {
+    const parts = String(key).split('::')
+    const productId = parts.shift() || ''
+    return firestore.collection(ONLINE_RESERVATION_COLLECTION).doc(reservationDocumentId(productId, parts.join('::')))
+  })
+  await firestore.runTransaction(async (transaction) => {
+    const snapshots = await Promise.all(refs.map((ref) => transaction.get(ref)))
+    snapshots.forEach((snapshot, index) => {
+      if (!snapshot.exists) return
+      const data = snapshot.data() || {}
+      if (String(data.reservationToken || '') === token && !data.verified) transaction.delete(refs[index])
+    })
+  })
+}
+
+async function markOnlineReservationsVerified(reservationKeys, reservationToken, paymentOrderId) {
+  if (!firestore || !Array.isArray(reservationKeys) || reservationKeys.length === 0) return
+  const token = String(reservationToken || '').trim()
+  if (!token) throw new Error('Checkout reservation token is required')
+  const refs = reservationKeys.map((key) => {
+    const parts = String(key).split('::')
+    const productId = parts.shift() || ''
+    return firestore.collection(ONLINE_RESERVATION_COLLECTION).doc(reservationDocumentId(productId, parts.join('::')))
+  })
+  const extendedExpiry = reservationExpiresAt()
+  await firestore.runTransaction(async (transaction) => {
+    const snapshots = await Promise.all(refs.map((ref) => transaction.get(ref)))
+    snapshots.forEach((snapshot, index) => {
+      if (!snapshot.exists) throw new Error('Checkout reservation expired. Please try again.')
+      const data = snapshot.data() || {}
+      if (String(data.reservationToken || '') !== token) throw new Error('Checkout reservation is no longer available.')
+      if (getTimestampMillis(data.expiresAt) <= Date.now()) throw new Error('Checkout reservation expired. Please try again.')
+      transaction.set(refs[index], { verified: true, paymentOrderId, expiresAt: extendedExpiry, verifiedAt: FieldValue.serverTimestamp() }, { merge: true })
+    })
+  })
+}
 function money(value) {
   const number = Number(value)
   return Number.isFinite(number) ? Math.round(number * 100) / 100 : 0
@@ -150,28 +246,64 @@ async function buildDiscountedPaymentIntent(items, discountPercent) {
 }
 
 app.post('/api/online/create-payment-order', async (req, res) => {
+  let reservationToken = String(req.body?.reservationToken || '').trim()
+  let reservationKeys = []
   try {
     if (!firestore) return res.status(503).json({ success: false, error: 'Server not configured' })
     const { razorpay } = getRuntimeDependencies()
     if (!razorpay) return res.status(503).json({ success: false, error: 'Payment service not configured' })
-
+    reservationToken = reservationToken || randomUUID()
     const items = normalizeCheckoutItems(req.body?.items)
     if (!items.length) return res.status(400).json({ success: false, error: 'At least one product is required' })
-
     const currency = String(req.body?.currency || 'INR').trim() || 'INR'
     const userId = String(req.body?.userId || 'guest').trim() || 'guest'
     const customerDetails = req.body?.customerDetails && typeof req.body.customerDetails === 'object' ? req.body.customerDetails : {}
+    const reservation = await reserveOnlineSizeStock(items, reservationToken)
+    reservationKeys = reservation.reservationKeys
     const { products, baseSubtotal, subtotal, discountPercent, productDiscountAmount, orderDiscountAmount, discountAmount, totalAmount } = await buildDiscountedPaymentIntent(items, req.body?.discountPercent)
-    const order = await razorpay.orders.create({ amount: Math.round(totalAmount * 100), currency, receipt: `receipt_${Date.now()}`, notes: { itemCount: String(products.length), discountPercent: String(discountPercent) } })
-
-    await firestore.collection(PAYMENT_INTENT_COLLECTION).doc(order.id).set({ userId, products, baseSubtotal, subtotal, discountPercent, productDiscountAmount, orderDiscountAmount, discountAmount, totalAmount, currency, customerDetails, verified: false, stored: false, createdAt: FieldValue.serverTimestamp() })
-
-    return res.json({ success: true, orderId: order.id, amount: order.amount, currency: order.currency, baseSubtotal, subtotal, discountPercent, productDiscountAmount, orderDiscountAmount, discountAmount, totalAmount, products })
+    const order = await razorpay.orders.create({ amount: Math.round(totalAmount * 100), currency, receipt: 'receipt_' + Date.now(), notes: { itemCount: String(products.length), discountPercent: String(discountPercent) } })
+    await firestore.collection(PAYMENT_INTENT_COLLECTION).doc(order.id).set({ userId, products, baseSubtotal, subtotal, discountPercent, productDiscountAmount, orderDiscountAmount, discountAmount, totalAmount, currency, customerDetails, verified: false, stored: false, reservationToken, reservationKeys, reservationExpiresAt: reservation.expiresAt || null, createdAt: FieldValue.serverTimestamp() })
+    return res.json({ success: true, orderId: order.id, amount: order.amount, currency: order.currency, baseSubtotal, subtotal, discountPercent, productDiscountAmount, orderDiscountAmount, discountAmount, totalAmount, products, reservationKeys, reservationExpiresAt: reservation.expiresAt || null })
   } catch (error) {
+    if (reservationKeys.length > 0) {
+      try { await releaseOnlineReservations(reservationKeys, reservationToken) } catch (releaseError) { console.error('Reservation release after payment-order failure failed:', releaseError) }
+    }
     console.error('Online payment order creation error:', error)
     const message = String(error?.message || '')
-    if (message.startsWith('Product not found') || message.startsWith('Product out of stock') || message.startsWith('Only ') || message.startsWith('Size ') || message.startsWith('Please select')) return res.status(409).json({ success: false, error: message })
+    if (message.startsWith('Product not found') || message.startsWith('Product out of stock') || message.startsWith('Only ') || message.startsWith('Size ') || message.startsWith('Please select') || message.startsWith('Checkout reservation')) return res.status(409).json({ success: false, error: message })
     return res.status(500).json({ success: false, error: 'Failed to create online payment order' })
+  }
+})
+app.post('/api/online/release-reservations', async (req, res) => {
+  try {
+    const reservationToken = String(req.body?.reservationToken || '').trim()
+    const reservationKeys = Array.isArray(req.body?.reservationKeys) ? req.body.reservationKeys : []
+    if (!reservationToken) return res.status(400).json({ success: false, error: 'Checkout reservation token is required' })
+    await releaseOnlineReservations(reservationKeys, reservationToken)
+    return res.json({ success: true })
+  } catch (error) {
+    console.error('Online reservation release error:', error)
+    return res.status(500).json({ success: false, error: 'Failed to release checkout reservation' })
+  }
+})
+app.post('/api/online/confirm-reservation', async (req, res) => {
+  try {
+    if (!firestore) return res.status(503).json({ success: false, error: 'Server not configured' })
+    const orderId = String(req.body?.orderId || '').trim()
+    if (!orderId) return res.status(400).json({ success: false, error: 'orderId is required' })
+    const intentSnapshot = await firestore.collection(PAYMENT_INTENT_COLLECTION).doc(orderId).get()
+    if (!intentSnapshot.exists) return res.status(404).json({ success: false, error: 'Payment intent not found' })
+    const intent = intentSnapshot.data() || {}
+    if (!intent.verified) return res.status(400).json({ success: false, error: 'Payment must be verified before confirming reservation' })
+    const refreshed = await reserveOnlineSizeStock(Array.isArray(intent.products) ? intent.products : [], String(intent.reservationToken || ''))
+    await markOnlineReservationsVerified(refreshed.reservationKeys, String(intent.reservationToken || ''), orderId)
+    await firestore.collection(PAYMENT_INTENT_COLLECTION).doc(orderId).set({ reservationKeys: refreshed.reservationKeys, reservationExpiresAt: refreshed.expiresAt || null }, { merge: true })
+    return res.json({ success: true, reservationKeys: refreshed.reservationKeys, reservationExpiresAt: refreshed.expiresAt || null })
+  } catch (error) {
+    console.error('Online reservation confirmation error:', error)
+    const message = String(error?.message || '')
+    if (message.startsWith('Size ') || message.startsWith('Checkout reservation') || message.startsWith('Please select')) return res.status(409).json({ success: false, error: message })
+    return res.status(500).json({ success: false, error: 'Failed to confirm checkout reservation' })
   }
 })
 
@@ -231,10 +363,19 @@ app.post('/api/online/complete-order', async (req, res) => {
 
     const orderRef = firestore.collection(ORDER_COLLECTION).doc()
     const inventoryRefs = sourceItems.map(() => firestore.collection(INVENTORY_TRANSACTION_COLLECTION).doc())
+    const reservationKeys = Array.isArray(intent.reservationKeys) ? intent.reservationKeys.map((key) => String(key || '').trim()).filter(Boolean) : []
+    const reservationToken = String(intent.reservationToken || '').trim()
+    const reservationRefs = reservationKeys.map((key) => {
+      const parts = key.split('::')
+      const productId = parts.shift() || ''
+      return firestore.collection(ONLINE_RESERVATION_COLLECTION).doc(reservationDocumentId(productId, parts.join('::')))
+    })
 
     const result = await firestore.runTransaction(async (transaction) => {
       const productRefs = sourceItems.map((item) => firestore.collection(PRODUCT_COLLECTION).doc(String(item.productId)))
       const snapshots = await Promise.all(productRefs.map((ref) => transaction.get(ref)))
+      const reservationSnapshots = await Promise.all(reservationRefs.map((ref) => transaction.get(ref)))
+      const reservationSnapshotByKey = new Map(reservationKeys.map((key, index) => [key, reservationSnapshots[index]]))
       const products = []
       let totalCost = 0
       const pendingProductUpdates = new Map()
@@ -257,6 +398,15 @@ app.post('/api/online/complete-order', async (req, res) => {
           const stockKey = Object.keys(sizeStock).find((key) => sameSize(key, matchedSize))
           if (Number(stockKey === undefined ? 0 : sizeStock[stockKey]) <= 0) throw new Error(`Size ${selectedSize} is sold out for ${String(product.name || requested.productId)}`)
           canonicalSize = matchedSize
+        }
+
+        if (sizes.length) {
+          const reservationKey = String(requested.productId) + '::' + canonicalSize
+          const reservationSnapshot = reservationSnapshotByKey.get(reservationKey)
+          const reservationData = reservationSnapshot?.exists ? reservationSnapshot.data() || {} : {}
+          if (!reservationSnapshot?.exists || String(reservationData.reservationToken || '') !== reservationToken || !reservationData.verified || getTimestampMillis(reservationData.expiresAt) <= Date.now()) {
+            throw new Error('Reservation expired for size ' + canonicalSize + ' of ' + String(product.name || requested.productId) + '. Please try again.')
+          }
         }
 
         if (!Number.isFinite(currentStock) || currentStock < quantity) throw new Error(`Insufficient stock for ${String(product.name || requested.productId)}`)
@@ -294,6 +444,7 @@ app.post('/api/online/complete-order', async (req, res) => {
       const profit = money(totalAmount - totalCost)
       transaction.set(orderRef, { userId: String(intent.userId || 'guest').trim() || 'guest', products, baseSubtotal: money(intent.baseSubtotal ?? subtotal), subtotal, discountPercent, productDiscountAmount: money(intent.productDiscountAmount), orderDiscountAmount: money(intent.orderDiscountAmount), discountAmount, totalAmount, currency: String(intent.currency || 'INR').trim() || 'INR', paymentId: String(intent.paymentId), paymentOrderId, paymentStatus: 'paid', paymentMethod: 'razorpay', orderStatus: requestedStatus, customerDetails: intent.customerDetails || {}, cost: money(totalCost), profit, margin: totalAmount > 0 ? money((profit / totalAmount) * 100) : 0, inventoryProcessed: true, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() })
       transaction.set(intentRef, { stored: true, inventoryProcessed: true, orderDocumentId: orderRef.id, completedAt: FieldValue.serverTimestamp() }, { merge: true })
+      reservationRefs.forEach((reservationRef) => transaction.delete(reservationRef))
       return { orderDocumentId: orderRef.id, totalAmount, cost: money(totalCost), profit, subtotal, discountPercent, discountAmount }
     })
 
@@ -301,7 +452,7 @@ app.post('/api/online/complete-order', async (req, res) => {
   } catch (error) {
     console.error('Online order completion error:', error)
     const message = String(error?.message || '')
-    if (message.startsWith('Product not found') || message.startsWith('Insufficient stock') || message.startsWith('Size ') || message.startsWith('Please select')) return res.status(409).json({ success: false, error: message })
+    if (message.startsWith('Product not found') || message.startsWith('Insufficient stock') || message.startsWith('Size ') || message.startsWith('Please select') || message.startsWith('Reservation expired')) return res.status(409).json({ success: false, error: message })
     return res.status(500).json({ success: false, error: 'Failed to complete online order' })
   }
 })
