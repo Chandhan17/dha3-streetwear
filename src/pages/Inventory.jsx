@@ -177,7 +177,7 @@ function Inventory() {
     }
   }
 
-  const handlePrint = (product) =>
+  const handlePrint = (product) => {
     const quantity = Number(labelQuantities[product.id] || product.stock || 1)
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > 1000) {
       setMessage('Label quantity must be a whole number between 1 and 1000.')
