@@ -53,7 +53,7 @@ function Home() {
       return productName.includes(normalizedQuery)
         && (selectedCategory === 'All' || productCategory === normalizedSelectedCategory)
         && (normalizedSelectedSizes.length === 0 || normalizedSelectedSizes.some((size) => productSizes.includes(size)))
-        && matchesPriceRange(product.price, selectedPriceRange)
+        && matchesPriceRange(product.effectivePrice ?? product.price, selectedPriceRange)
     })
   }, [products, searchQuery, selectedCategory, selectedSizes, selectedPriceRange])
 
