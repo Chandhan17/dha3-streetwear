@@ -46,8 +46,11 @@ function ProductCard({ product, showNewTag = false, discountLabel = '', onBuyNow
 
   const productName = String(product?.name || 'Product').trim() || 'Product'
   const productId = product?.id
-  const numericPrice = Number(product?.price || 0)
+  const originalPrice = Number(product?.price || 0)
+  const discountPercent = Math.min(100, Math.max(0, Number(product?.discountPercent || 0)))
+  const numericPrice = Number(product?.effectivePrice ?? originalPrice)
   const formattedPrice = new Intl.NumberFormat('en-IN').format(numericPrice)
+  const formattedOriginalPrice = new Intl.NumberFormat('en-IN').format(originalPrice)
   const categoryLabel = String(product?.category || 'Uncategorized').trim() || 'Uncategorized'
   const stock = Number(product?.stock ?? 0)
   const isOutOfStock = Number.isFinite(stock) && stock <= 0
@@ -134,7 +137,7 @@ function ProductCard({ product, showNewTag = false, discountLabel = '', onBuyNow
       <div className="relative aspect-[3/4] overflow-hidden bg-black">
         <div className="absolute left-3 top-3 z-10 flex gap-2">
           {isNewArrival && <span className="border border-white/20 bg-black/70 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.2em] text-white">New Arrival</span>}
-          {discountLabel && <span className="border border-white/20 bg-white px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.2em] text-black">{discountLabel}</span>}
+          {discountPercent > 0 && <span className="border border-white/20 bg-white px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.2em] text-black">{discountPercent}% OFF</span>}
           {isOutOfStock && <span className="border border-red-300/30 bg-red-500/80 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.2em] text-white">Out of Stock</span>}
         </div>
 
@@ -152,7 +155,7 @@ function ProductCard({ product, showNewTag = false, discountLabel = '', onBuyNow
       <div className="space-y-3 p-4 md:p-5">
         <p className="w-fit border border-white/20 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.2em] text-white/70">{categoryLabel}</p>
         <h3 className="line-clamp-2 min-h-[2.8rem] text-sm font-semibold uppercase tracking-[0.04em] text-white md:text-base">{productName}</h3>
-        <p className="font-display text-2xl leading-none text-white md:text-[1.9rem]">₹{formattedPrice}</p>
+        <div className="flex items-end gap-2"><p className="font-display text-2xl leading-none text-white md:text-[1.9rem]">₹{formattedPrice}</p>{discountPercent > 0 && <span className="pb-0.5 text-sm text-white/40 line-through">₹{formattedOriginalPrice}</span>}</div>
 
         {hasSizes && !isOutOfStock && <div className="space-y-2"><div className="flex items-center justify-between gap-2"><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/55">Available Sizes</p><p className="text-[10px] text-white/40">1 each</p></div><div className={`flex flex-wrap gap-1.5 ${showSizeError && isSizeShakeActive ? 'size-shake' : ''}`}>{sizeOptions.map((size) => { const soldOut = Object.prototype.hasOwnProperty.call(sizeStock, size) && Number(sizeStock[size]) <= 0; const isActive = selectedSize === size; return <button key={`${productId || productName}-${size}`} type="button" disabled={soldOut} onClick={(event) => { event.stopPropagation(); if (soldOut) return; setSelectedSize(size); setShowSizeError(false) }} className={`border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition ${soldOut ? 'cursor-not-allowed border-black/10 bg-black/10 text-black/25 line-through opacity-40' : isActive ? 'border-white bg-white text-black' : showSizeError ? 'border-red-500 bg-red-500/10 text-red-200 hover:border-red-400' : 'border-white/20 bg-black text-white/80 hover:border-white/45'}`}>{size}</button> })}</div>{showSizeError && <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-red-300">Select a size to continue</p>}</div>}
         {isOutOfStock && <p className="text-xs font-semibold uppercase tracking-[0.16em] text-red-300">Currently unavailable</p>}
