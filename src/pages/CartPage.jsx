@@ -93,6 +93,7 @@ function CartPage() {
   const { errorMessage, showError, clearError } = useBrandedNotification()
   const [customerDetails, setCustomerDetails] = useState(() => readStoredCustomerDetails())
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [onlineBill, setOnlineBill] = useState(null)
   const clearCartRef = useRef(clearCart)
   const buyNowCleanupTimerRef = useRef(null)
   clearCartRef.current = clearCart
@@ -161,6 +162,21 @@ function CartPage() {
     return true
   }
 
+  const handleContinueToWhatsApp = () => {
+    if (!onlineBill) return
+    try {
+      openWhatsAppOrderMessage({
+        customerDetails: onlineBill.customerDetails,
+        items: onlineBill.items,
+        orderId: onlineBill.orderId,
+        paymentId: onlineBill.paymentId,
+        amount: onlineBill.amount,
+      })
+    } catch (error) {
+      showError(error.message || 'Payment succeeded, but WhatsApp could not be opened')
+    }
+  }
+
   const handleRazorpayCheckout = async () => {
     if (!hasItems) {
       showError('Your cart is empty')
@@ -191,17 +207,36 @@ function CartPage() {
         customerPhone: customerDetails.phone.trim(),
         customerEmail: '',
         productImage: items[0]?.imageUrl || '/dha-logo.png',
-        onSuccess: async ({ orderId, paymentId, amount }) => {
-          const purchasedItems = [...items]
+        onSuccess: async ({ orderId, paymentId, amount, baseSubtotal, subtotal, discountPercent, productDiscountAmount, orderDiscountAmount, discountAmount, products: paidProducts }) => {
+          const purchasedItems = Array.isArray(paidProducts) && paidProducts.length
+            ? paidProducts.map((item) => ({
+                productId: item.productId,
+                name: item.name,
+                price: Number(item.unitPrice || 0),
+                imageUrl: item.imageUrl || '',
+                selectedSize: item.selectedSize || 'N/A',
+                quantity: Number(item.quantity || 1),
+              }))
+            : [...items]
           const purchasedCustomerDetails = { ...customerDetails }
           try { window.sessionStorage.removeItem(BUY_NOW_CHECKOUT_KEY) } catch { /* Ignore storage failures. */ }
           clearCart()
 
-          try {
-            openWhatsAppOrderMessage({ customerDetails: purchasedCustomerDetails, items: purchasedItems, orderId, paymentId, amount })
-          } catch (error) {
-            showError(error.message || 'Payment succeeded, but WhatsApp could not be opened')
-          }
+          setOnlineBill({
+            billNo: `ONL-${String(orderId || '').slice(-8).toUpperCase()}`,
+            orderId,
+            paymentId,
+            amount: Number(amount || 0),
+            baseSubtotal: Number(baseSubtotal || subtotal || 0),
+            subtotal: Number(subtotal || 0),
+            discountPercent: Number(discountPercent || 0),
+            productDiscountAmount: Number(productDiscountAmount || 0),
+            orderDiscountAmount: Number(orderDiscountAmount || 0),
+            discountAmount: Number(discountAmount || 0),
+            items: purchasedItems,
+            customerDetails: purchasedCustomerDetails,
+            createdAt: new Date().toISOString(),
+          })
         },
         onFailure: (error) => showError(error.message || 'Payment failed. Please try again'),
       })
@@ -216,6 +251,7 @@ function CartPage() {
     <div className="min-h-screen bg-canvas text-white">
       <BrandedNotification message={errorMessage} />
       <Navbar />
+      <style>{`@media print { body * { visibility: hidden !important; } #online-bill, #online-bill * { visibility: visible !important; } #online-bill { position: absolute; inset: 0; width: 100%; background: #fff !important; color: #000 !important; box-shadow: none !important; } }`}</style>
       <main className="mx-auto w-full max-w-[1200px] px-4 pb-16 pt-8 md:px-6 md:pt-12">
         <section className="street-panel overflow-hidden p-5 md:p-7">
           <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.22em] text-white/50">Curated Cart</p><h1 className="mt-2 font-display text-3xl md:text-5xl">Your Cart</h1></div><p className="text-sm text-white/65">{cartCount} item{cartCount === 1 ? '' : 's'} in your bag</p></div>
@@ -244,6 +280,51 @@ function CartPage() {
           </aside>
         </div>
       </main>
+      {onlineBill && <div className="fixed inset-0 z-[200] overflow-y-auto bg-black/80 px-4 py-8 backdrop-blur-sm">
+        <div className="mx-auto w-full max-w-2xl">
+          <section id="online-bill" className="rounded-3xl bg-white p-6 text-black shadow-2xl md:p-8">
+            <div className="flex items-start justify-between gap-4 border-b border-black/10 pb-5">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-black/45">Online Invoice</p>
+                <h2 className="mt-1 text-2xl font-bold tracking-tight">DHA THREE STREETWEAR</h2>
+                <p className="mt-1 text-xs text-black/50">Bill No: {onlineBill.billNo}</p>
+              </div>
+              <div className="rounded-full bg-green-100 px-3 py-1 text-xs font-bold uppercase tracking-[0.12em] text-green-700">Paid</div>
+            </div>
+
+            <div className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
+              <div><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-black/40">Customer</p><p className="mt-1 font-semibold">{formatCustomerField(onlineBill.customerDetails.name)}</p><p className="text-black/60">{formatCustomerField(onlineBill.customerDetails.phone)}</p></div>
+              <div className="sm:text-right"><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-black/40">Order Date</p><p className="mt-1 font-semibold">{new Date(onlineBill.createdAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}</p><p className="text-black/60">Payment: Razorpay</p></div>
+            </div>
+
+            <div className="mt-6 overflow-hidden rounded-2xl border border-black/10">
+              {onlineBill.items.map((item, index) => <div key={String(item.productId || item.name) + '-' + String(item.selectedSize || 'N/A') + '-' + index} className="flex items-start justify-between gap-4 border-b border-black/10 p-4 last:border-b-0">
+                <div className="min-w-0"><p className="font-semibold">{item.name}</p><p className="mt-1 text-xs text-black/55">{item.selectedSize && item.selectedSize !== 'N/A' ? 'Size ' + item.selectedSize + ' · ' : ''}Qty {item.quantity}</p></div>
+                <p className="shrink-0 font-semibold">₹{money(Number(item.price || 0) * Number(item.quantity || 0)).toLocaleString('en-IN')}</p>
+              </div>)}
+            </div>
+
+            <div className="mt-6 ml-auto max-w-sm space-y-2 text-sm">
+              <div className="flex justify-between"><span className="text-black/55">Original Subtotal</span><span>₹{money(onlineBill.baseSubtotal).toLocaleString('en-IN')}</span></div>
+              {onlineBill.productDiscountAmount > 0 && <div className="flex justify-between text-green-700"><span>Product Discount</span><span>-₹{money(onlineBill.productDiscountAmount).toLocaleString('en-IN')}</span></div>}
+              {onlineBill.orderDiscountAmount > 0 && <div className="flex justify-between text-green-700"><span>Order Discount</span><span>-₹{money(onlineBill.orderDiscountAmount).toLocaleString('en-IN')}</span></div>}
+              <div className="flex justify-between border-t border-black/10 pt-3 text-lg font-bold"><span>Total Paid</span><span>₹{money(onlineBill.amount).toLocaleString('en-IN')}</span></div>
+            </div>
+
+            <div className="mt-6 rounded-2xl bg-black/[0.04] p-4 text-xs text-black/60">
+              <p>Order ID: <span className="font-semibold text-black">{onlineBill.orderId}</span></p>
+              <p className="mt-1">Payment ID: <span className="font-semibold text-black">{onlineBill.paymentId}</span></p>
+              {buildFullAddress(onlineBill.customerDetails) && <p className="mt-1">Delivery Address: <span className="font-semibold text-black">{buildFullAddress(onlineBill.customerDetails)}</span></p>}
+            </div>
+
+            <div className="mt-6 flex flex-wrap justify-end gap-2">
+              <button type="button" onClick={() => window.print()} className="rounded-full border border-black/15 px-5 py-2.5 text-sm font-semibold uppercase tracking-[0.1em] text-black">Print Bill</button>
+              <button type="button" onClick={handleContinueToWhatsApp} className="rounded-full bg-black px-5 py-2.5 text-sm font-semibold uppercase tracking-[0.1em] text-white">Continue to WhatsApp</button>
+              <button type="button" onClick={() => setOnlineBill(null)} className="rounded-full border border-black/15 px-5 py-2.5 text-sm font-semibold uppercase tracking-[0.1em] text-black">Close</button>
+            </div>
+          </section>
+        </div>
+      </div>}
       <Footer />
     </div>
   )
