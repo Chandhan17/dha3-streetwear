@@ -119,6 +119,101 @@ app.post('/api/admin/inventory/adjust', attachUserFromToken, isAdmin, async (req
     return res.status(500).json({ success: false, message: 'Failed to adjust inventory' })
   }
 })
+app.post('/api/admin/inventory/restock', attachUserFromToken, isAdmin, async (req, res) => {
+  try {
+    const firestore = getFirestoreInstance()
+    if (!firestore) return res.status(503).json({ success: false, message: 'Server not configured' })
+
+    const productId = String(req.body?.productId || '').trim()
+    const requestedQuantity = Number(req.body?.quantity)
+    const requestedSizes = Array.isArray(req.body?.sizes)
+      ? [...new Set(req.body.sizes.map((size) => String(size || '').trim()).filter(Boolean))]
+      : []
+    const notes = String(req.body?.notes || '').trim()
+    const reason = String(req.body?.reason || 'Stock restock').trim() || 'Stock restock'
+
+    if (!productId) return res.status(400).json({ success: false, message: 'productId is required' })
+    if (requestedSizes.length === 0 && (!Number.isInteger(requestedQuantity) || requestedQuantity <= 0)) {
+      return res.status(400).json({ success: false, message: 'Enter a positive quantity or select at least one size' })
+    }
+
+    const productRef = firestore.collection(PRODUCT_COLLECTION).doc(productId)
+    const transactionRef = firestore.collection(INVENTORY_TRANSACTION_COLLECTION).doc()
+
+    const result = await firestore.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(productRef)
+      if (!snapshot.exists) throw new Error('Product not found')
+
+      const product = snapshot.data() || {}
+      const currentStock = Number(product.stock ?? product.openingStock ?? 0)
+      if (!Number.isFinite(currentStock) || currentStock < 0) throw new Error('Current stock is invalid')
+
+      const sizes = normalizeSizes(product.sizes)
+      const sourceSizeStock = product?.sizeStock && typeof product.sizeStock === 'object' && !Array.isArray(product.sizeStock)
+        ? product.sizeStock
+        : {}
+
+      if (sizes.length > 0) {
+        if (requestedSizes.length === 0) throw new Error('Select at least one size to restock')
+
+        const nextSizeStock = { ...sizes.reduce((accumulator, size) => {
+          const raw = sourceSizeStock[size]
+          accumulator[size] = raw === undefined ? 1 : (Number(raw) > 0 ? 1 : 0)
+          return accumulator
+        }, {}) }
+
+        let addedCount = 0
+        const actuallyRestockedSizes = []
+
+        requestedSizes.forEach((requestedSize) => {
+          const matchedSize = sizes.find((size) => size.toLowerCase() === requestedSize.toLowerCase())
+          if (!matchedSize) throw new Error(`Invalid size ${requestedSize} for this product`)
+          if (Number(nextSizeStock[matchedSize]) > 0) return
+          nextSizeStock[matchedSize] = 1
+          addedCount += 1
+          actuallyRestockedSizes.push(matchedSize)
+        })
+
+        if (addedCount === 0) throw new Error('Selected sizes are already in stock')
+
+        const nextStock = currentStock + addedCount
+        transaction.update(productRef, { stock: nextStock, sizeStock: nextSizeStock, updatedAt: FieldValue.serverTimestamp() })
+        transaction.set(transactionRef, {
+          productId, type: 'restock', quantity: addedCount, stockBefore: currentStock, stockAfter: nextStock,
+          selectedSizes: actuallyRestockedSizes, reason, notes, createdBy: req.user.uid, createdAt: FieldValue.serverTimestamp(),
+        })
+
+        return { productId, mode: 'sizes', quantity: addedCount, stockBefore: currentStock, stockAfter: nextStock, sizeStock: nextSizeStock, selectedSizes: actuallyRestockedSizes }
+      }
+
+      if (!Number.isInteger(requestedQuantity) || requestedQuantity <= 0) throw new Error('Enter a positive whole-number quantity')
+
+      const nextStock = currentStock + requestedQuantity
+      transaction.update(productRef, { stock: nextStock, updatedAt: FieldValue.serverTimestamp() })
+      transaction.set(transactionRef, {
+        productId, type: 'restock', quantity: requestedQuantity, stockBefore: currentStock, stockAfter: nextStock,
+        reason, notes, createdBy: req.user.uid, createdAt: FieldValue.serverTimestamp(),
+      })
+
+      return { productId, mode: 'quantity', quantity: requestedQuantity, stockBefore: currentStock, stockAfter: nextStock }
+    })
+
+    return res.status(200).json({ success: true, inventory: result })
+  } catch (error) {
+    console.error('Inventory restock error:', error)
+    const message = String(error?.message || '')
+    if (
+      message === 'Product not found'
+      || message === 'Current stock is invalid'
+      || message === 'Select at least one size to restock'
+      || message === 'Selected sizes are already in stock'
+      || message.startsWith('Invalid size ')
+      || message.startsWith('Enter a positive')
+    ) return res.status(409).json({ success: false, message })
+    return res.status(500).json({ success: false, message: 'Failed to restock inventory' })
+  }
+})
+
 
 app.post('/api/admin/pos/sale', attachUserFromToken, isAdmin, async (req, res) => {
   try {
