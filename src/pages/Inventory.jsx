@@ -6,7 +6,7 @@ import Button from '../components/Button'
 import EmptyState from '../components/EmptyState'
 import Loader from '../components/Loader'
 import { fetchProducts } from '../services/productService'
-import { adjustInventory } from '../services/inventoryService'
+import { adjustInventory, restockInventory } from '../services/inventoryService'
 import { barcodeSvg } from '../utils/barcode'
 
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>\"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;' }[character]))
@@ -51,6 +51,11 @@ function Inventory() {
   const [quantities, setQuantities] = useState({})
   const [labelQuantities, setLabelQuantities] = useState({})
   const [message, setMessage] = useState('')
+  const [restockProduct, setRestockProduct] = useState(null)
+  const [restockQuantity, setRestockQuantity] = useState('')
+  const [restockSizes, setRestockSizes] = useState([])
+  const [restockNotes, setRestockNotes] = useState('')
+  const [restocking, setRestocking] = useState(false)
 
   const loadProducts = async () => {
     setIsLoading(true)
@@ -95,7 +100,84 @@ function Inventory() {
     }
   }
 
-  const handlePrint = (product) => {
+  const getProductSizes = (product) => {
+    if (Array.isArray(product?.sizes)) return [...new Set(product.sizes.map((size) => String(size || '').trim()).filter(Boolean))]
+    if (typeof product?.sizes === 'string') return [...new Set(product.sizes.split(',').map((size) => String(size || '').trim()).filter(Boolean))]
+    return []
+  }
+
+  const isSizeAvailable = (product, size) => {
+    const sizeStock = product?.sizeStock && typeof product.sizeStock === 'object' ? product.sizeStock : {}
+    const sourceKey = Object.keys(sizeStock).find((key) => String(key).toLowerCase() === String(size).toLowerCase())
+    return Number(sourceKey === undefined ? 1 : sizeStock[sourceKey]) > 0
+  }
+
+  const openRestock = (product) => {
+    setRestockProduct(product)
+    setRestockQuantity('')
+    setRestockSizes([])
+    setRestockNotes('')
+    setMessage('')
+  }
+
+  const closeRestock = () => {
+    if (restocking) return
+    setRestockProduct(null)
+    setRestockQuantity('')
+    setRestockSizes([])
+    setRestockNotes('')
+  }
+
+  const toggleRestockSize = (size) => {
+    setRestockSizes((current) => current.includes(size) ? current.filter((item) => item !== size) : [...current, size])
+  }
+
+  const submitRestock = async () => {
+    if (!restockProduct) return
+    const sizes = getProductSizes(restockProduct)
+    const hasSizes = sizes.length > 0
+    const quantity = Number(restockQuantity)
+
+    if (hasSizes && restockSizes.length === 0) {
+      setMessage('Select at least one sold-out size to restock.')
+      return
+    }
+    if (!hasSizes && (!Number.isInteger(quantity) || quantity <= 0)) {
+      setMessage('Enter a whole-number quantity greater than 0.')
+      return
+    }
+
+    setRestocking(true)
+    setMessage('')
+    try {
+      const result = await restockInventory({
+        productId: restockProduct.id,
+        quantity: hasSizes ? 0 : quantity,
+        sizes: hasSizes ? restockSizes : [],
+        notes: restockNotes,
+      })
+      const inventory = result.inventory || {}
+      setProducts((current) => current.map((item) => item.id === restockProduct.id
+        ? { ...item, stock: inventory.stockAfter, ...(inventory.sizeStock ? { sizeStock: inventory.sizeStock } : {}) }
+        : item))
+      setLabelQuantities((current) => ({ ...current, [restockProduct.id]: Math.max(1, Number(inventory.stockAfter || 1)) }))
+      setRestockProduct(null)
+      setRestockQuantity('')
+      setRestockSizes([])
+      setRestockNotes('')
+      setMessage(
+        inventory.mode === 'sizes'
+          ? `Restocked: ${(inventory.selectedSizes || []).join(', ')}. Stock is now ${inventory.stockAfter}.`
+          : `Added ${inventory.quantity} unit(s). Stock is now ${inventory.stockAfter}.`,
+      )
+    } catch (error) {
+      setMessage(error.message || 'Unable to restock inventory.')
+    } finally {
+      setRestocking(false)
+    }
+  }
+
+  const handlePrint = (product) =>
     const quantity = Number(labelQuantities[product.id] || product.stock || 1)
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > 1000) {
       setMessage('Label quantity must be a whole number between 1 and 1000.')
@@ -129,6 +211,10 @@ function Inventory() {
           </div>
         </div>
 
+        <div className="rounded-2xl border border-[#c19a6b]/20 bg-[#c19a6b]/5 p-4 text-sm text-white/65 shadow-soft">
+          <span className="font-semibold text-[#c19a6b]">Restock:</span> use Restock on a product to add newly received stock. For size-based products, select the sold-out sizes received; each selected size becomes available again.
+        </div>
+
         <div className="rounded-2xl border border-white/10 bg-[#111111] p-4 text-sm text-white/55 shadow-soft">
           <span className="font-semibold text-white">Thermal labels:</span> set the number of stickers to print for each product, then click Print Label. The current layout is optimized for a small 58 × 32 mm-style label and can be adjusted when the client's actual sticker size is confirmed.
         </div>
@@ -159,7 +245,7 @@ function Inventory() {
                       <td className="px-4 py-4"><p className="text-sm font-medium text-white">{product.name}</p><p className="text-xs text-white/40">{product.category || 'Uncategorized'}</p></td>
                       <td className="px-4 py-4 text-xs text-white/50">{product.sku || '-'}<br />{product.barcode || '-'}</td>
                       <td className="px-4 py-4"><Badge tone={stock > 0 ? 'success' : 'danger'}>{stock} unit(s)</Badge></td>
-                      <td className="px-4 py-4"><div className="flex items-center gap-2"><input type="number" min="1" step="1" value={quantities[product.id] || ''} onChange={(event) => setQuantities((current) => ({ ...current, [product.id]: event.target.value }))} placeholder="Qty" className="w-24 rounded-xl border border-white/15 bg-[#0b0b0b] px-3 py-2 text-sm text-white outline-none focus:border-[#c19a6b]" /><Button disabled={isSaving} onClick={() => updateStock(product, 'in')}>+ Stock</Button><Button variant="danger" disabled={isSaving || stock <= 0} onClick={() => updateStock(product, 'out')}>- Stock</Button></div></td>
+                      <td className="px-4 py-4"><div className="flex items-center gap-2"><input type="number" min="1" step="1" value={quantities[product.id] || ''} onChange={(event) => setQuantities((current) => ({ ...current, [product.id]: event.target.value }))} placeholder="Qty" className="w-24 rounded-xl border border-white/15 bg-[#0b0b0b] px-3 py-2 text-sm text-white outline-none focus:border-[#c19a6b]" /><Button disabled={isSaving} onClick={() => updateStock(product, 'in')}>+ Stock</Button><Button variant="danger" disabled={isSaving || stock <= 0} onClick={() => updateStock(product, 'out')}>- Stock</Button><Button variant="secondary" disabled={isSaving} onClick={() => openRestock(product)}>Restock</Button></div></td>
                       <td className="px-4 py-4"><input type="number" min="1" max="1000" step="1" value={labelQuantities[product.id] || ''} onChange={(event) => setLabelQuantities((current) => ({ ...current, [product.id]: event.target.value }))} className="w-24 rounded-xl border border-white/15 bg-[#0b0b0b] px-3 py-2 text-sm text-white outline-none focus:border-[#c19a6b]" /></td>
                       <td className="px-4 py-4"><Button variant="secondary" disabled={!product.barcode} onClick={() => handlePrint(product)}>Print Label</Button></td>
                     </tr>
@@ -170,6 +256,62 @@ function Inventory() {
           </div>
         )}
       </div>
+
+      {restockProduct && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) closeRestock() }}>
+          <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#151515] p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#c19a6b]">Inventory</p>
+                <h2 className="mt-1 text-xl font-semibold text-white">Restock Product</h2>
+                <p className="mt-1 text-sm text-white/45">{restockProduct.name}</p>
+              </div>
+              <button type="button" onClick={closeRestock} className="rounded-lg px-2 py-1 text-white/50 hover:bg-white/5 hover:text-white" aria-label="Close">✕</button>
+            </div>
+
+            {getProductSizes(restockProduct).length > 0 ? (
+              <div className="mt-5">
+                <p className="mb-2 text-sm font-medium text-white">Select sizes received</p>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {getProductSizes(restockProduct).map((size) => {
+                    const available = isSizeAvailable(restockProduct, size)
+                    const selected = restockSizes.includes(size)
+                    return (
+                      <button
+                        key={size}
+                        type="button"
+                        disabled={available || restocking}
+                        onClick={() => toggleRestockSize(size)}
+                        className={`rounded-xl border px-3 py-3 text-left transition ${available ? 'cursor-not-allowed border-white/5 bg-white/[0.03] text-white/30' : selected ? 'border-[#c19a6b] bg-[#c19a6b]/10 text-white' : 'border-white/10 bg-[#0d0d0d] text-white/70 hover:border-white/25'}`}
+                      >
+                        <span className="block text-sm font-semibold">{size}</span>
+                        <span className="mt-1 block text-[11px]">{available ? 'In stock' : selected ? 'Will restock' : 'Sold out'}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+                <p className="mt-3 text-xs text-white/40">Size inventory is currently tracked as one available piece per size. Restocking a size makes that size available again.</p>
+              </div>
+            ) : (
+              <div className="mt-5">
+                <label className="mb-2 block text-sm font-medium text-white">Quantity to add</label>
+                <input value={restockQuantity} onChange={(event) => setRestockQuantity(event.target.value)} type="number" min="1" step="1" placeholder="e.g. 10" disabled={restocking} className="w-full rounded-xl border border-white/10 bg-[#0d0d0d] px-3 py-3 text-sm text-white outline-none focus:border-[#c19a6b]" />
+              </div>
+            )}
+
+            <div className="mt-4">
+              <label className="mb-2 block text-sm font-medium text-white">Notes <span className="text-white/35">(optional)</span></label>
+              <textarea value={restockNotes} onChange={(event) => setRestockNotes(event.target.value)} rows="3" disabled={restocking} placeholder="e.g. New stock received from supplier" className="w-full resize-none rounded-xl border border-white/10 bg-[#0d0d0d] px-3 py-3 text-sm text-white outline-none focus:border-[#c19a6b]" />
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <Button variant="secondary" disabled={restocking} onClick={closeRestock}>Cancel</Button>
+              <Button disabled={restocking} onClick={submitRestock}>{restocking ? 'Restocking...' : 'Add Stock'}</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </AdminLayout>
   )
 }
