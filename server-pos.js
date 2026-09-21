@@ -275,20 +275,72 @@ app.post('/api/admin/pos/sale', attachUserFromToken, isAdmin, async (req, res) =
       const totalAmount = asMoney(subtotal - totalDiscount + gstTotal)
       const profit = asMoney(subtotal - totalDiscount - costTotal)
 
+      // Multiple cart lines can reference the same product when the customer buys
+      // different sizes (for example, size 2 and size 3). Build one inventory
+      // update per product so a later line cannot overwrite the earlier size change.
+      const productSaleSummary = new Map()
+
       saleItems.forEach((item, index) => {
-        const productRef = productRefs[index]
-        const inventoryRef = inventoryRefs[index]
         const productData = snapshots[index].data() || {}
         const currentStock = Number(productData.stock ?? productData.openingStock ?? 0)
-        const newStock = currentStock - item.quantity
         const sizes = normalizeSizes(productData.sizes)
-        const nextSizeStock = sizes.length
-          ? { ...getSizeStock(productData), [item.selectedSize]: 0 }
-          : null
-        transaction.update(productRef, sizes.length
-          ? { stock: newStock, sizeStock: nextSizeStock, updatedAt: FieldValue.serverTimestamp() }
-          : { stock: newStock, updatedAt: FieldValue.serverTimestamp() })
-        transaction.set(inventoryRef, { productId: item.productId, type: 'sale', quantity: -item.quantity, stockBefore: currentStock, stockAfter: newStock, selectedSize: item.selectedSize, referenceId: billRef.id, billNo, reason: 'POS sale', createdBy: req.user.uid, createdAt: FieldValue.serverTimestamp() })
+        const existing = productSaleSummary.get(item.productId)
+
+        if (!existing) {
+          productSaleSummary.set(item.productId, {
+            productRef: productRefs[index],
+            productData,
+            currentStock,
+            totalQuantity: item.quantity,
+            sizes,
+            soldSizes: sizes.length && item.selectedSize !== 'N/A' ? [item.selectedSize] : [],
+          })
+        } else {
+          existing.totalQuantity += item.quantity
+          if (existing.sizes.length && item.selectedSize !== 'N/A') {
+            existing.soldSizes.push(item.selectedSize)
+          }
+        }
+      })
+
+      productSaleSummary.forEach((summary) => {
+        const newStock = summary.currentStock - summary.totalQuantity
+        const updates = { stock: newStock, updatedAt: FieldValue.serverTimestamp() }
+
+        if (summary.sizes.length) {
+          const nextSizeStock = getSizeStock(summary.productData)
+          summary.soldSizes.forEach((size) => {
+            const matchedSize = summary.sizes.find((availableSize) => availableSize.toLowerCase() === String(size).toLowerCase())
+            if (matchedSize) nextSizeStock[matchedSize] = 0
+          })
+          updates.sizeStock = nextSizeStock
+        }
+
+        transaction.update(summary.productRef, updates)
+      })
+
+      saleItems.forEach((item, index) => {
+        const productData = snapshots[index].data() || {}
+        const summary = productSaleSummary.get(item.productId)
+        const stockBefore = summary.currentStock
+        const itemStockAfter = stockBefore - saleItems
+          .slice(0, index + 1)
+          .filter((saleItem) => saleItem.productId === item.productId)
+          .reduce((sum, saleItem) => sum + saleItem.quantity, 0)
+
+        transaction.set(inventoryRefs[index], {
+          productId: item.productId,
+          type: 'sale',
+          quantity: -item.quantity,
+          stockBefore,
+          stockAfter: itemStockAfter,
+          selectedSize: item.selectedSize,
+          referenceId: billRef.id,
+          billNo,
+          reason: 'POS sale',
+          createdBy: req.user.uid,
+          createdAt: FieldValue.serverTimestamp(),
+        })
       })
 
       transaction.set(billRef, {
