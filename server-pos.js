@@ -304,6 +304,10 @@ app.post('/api/admin/pos/sale', attachUserFromToken, isAdmin, async (req, res) =
       })
 
       productSaleSummary.forEach((summary) => {
+        if (!Number.isFinite(summary.currentStock) || summary.currentStock < summary.totalQuantity) {
+          throw new Error(`Insufficient stock for ${String(summary.productData.name || 'Product')}`)
+        }
+
         const newStock = summary.currentStock - summary.totalQuantity
         const updates = { stock: newStock, updatedAt: FieldValue.serverTimestamp() }
 
@@ -320,7 +324,6 @@ app.post('/api/admin/pos/sale', attachUserFromToken, isAdmin, async (req, res) =
       })
 
       saleItems.forEach((item, index) => {
-        const productData = snapshots[index].data() || {}
         const summary = productSaleSummary.get(item.productId)
         const stockBefore = summary.currentStock
         const itemStockAfter = stockBefore - saleItems
