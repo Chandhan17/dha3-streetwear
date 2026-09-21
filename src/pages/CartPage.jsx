@@ -91,12 +91,6 @@ function openWhatsAppOrderMessage({ customerDetails, items, orderId, paymentId, 
 function printOnlineBill(bill) {
   if (!bill) return
 
-  const printWindow = window.open('', '_blank', 'width=800,height=900')
-  if (!printWindow) {
-    window.alert('Please allow pop-ups for this site to print the invoice.')
-    return
-  }
-
   const escapeHtml = (value) => String(value ?? '')
     .replace(/[&<>"']/g, (character) => ({
       '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;',
@@ -117,8 +111,32 @@ function printOnlineBill(bill) {
   const orderDiscount = Number(bill.orderDiscountAmount || 0)
   const address = buildFullAddress(customer)
 
-  printWindow.document.open()
-  printWindow.document.write(`<!doctype html><html><head>
+  const printFrame = document.createElement('iframe')
+  printFrame.setAttribute('title', 'Invoice print')
+  printFrame.style.position = 'fixed'
+  printFrame.style.right = '0'
+  printFrame.style.bottom = '0'
+  printFrame.style.width = '0'
+  printFrame.style.height = '0'
+  printFrame.style.border = '0'
+  printFrame.style.opacity = '0'
+  printFrame.style.pointerEvents = 'none'
+
+  const cleanup = () => {
+    if (printFrame.parentNode) printFrame.parentNode.removeChild(printFrame)
+  }
+
+  document.body.appendChild(printFrame)
+
+  const printDocument = printFrame.contentDocument || printFrame.contentWindow?.document
+  if (!printDocument || !printFrame.contentWindow) {
+    cleanup()
+    window.alert('Unable to prepare the invoice for printing. Please try again.')
+    return
+  }
+
+  printDocument.open()
+  printDocument.write(`<!doctype html><html><head>
   <meta charset="utf-8">
   <title>Online Invoice - ${escapeHtml(bill.billNo)}</title>
   <style>
@@ -168,13 +186,28 @@ function printOnlineBill(bill) {
       ${address ? `<div>Delivery Address: <strong>${escapeHtml(address)}</strong></div>` : ''}
     </div>
   </div>
-  <script>
-    window.onload = function () {
-      setTimeout(function () { window.print(); }, 200);
-      window.onafterprint = function () { window.close(); };
-    };
-  </script></body></html>`)
-  printWindow.document.close()
+  </body></html>`)
+  printDocument.close()
+
+  const startPrint = () => {
+    try {
+      printFrame.contentWindow.focus()
+      printFrame.contentWindow.print()
+    } finally {
+      printFrame.contentWindow.onafterprint = () => {
+        window.setTimeout(cleanup, 100)
+      }
+      window.setTimeout(cleanup, 2000)
+    }
+  }
+
+  if (printFrame.contentWindow) {
+    printFrame.contentWindow.onafterprint = () => {
+      window.setTimeout(cleanup, 100)
+    }
+  }
+
+  window.setTimeout(startPrint, 100)
 }
 
 function CartPage() {
